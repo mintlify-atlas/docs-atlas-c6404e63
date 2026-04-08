@@ -1,0 +1,265 @@
+---
+title: "Sessions"
+description: "List, inspect, reset, and delete active assessment sessions."
+---
+
+Sessions are created automatically when a message is sent to `POST /api/chat` without a `session_id`. Each session holds the full conversation state for one applicant assessment.
+
+<Note>
+  Sessions are stored in memory. Restarting the server clears all active sessions. For persistence, session data is also written to the PostgreSQL database via the admin export endpoints.
+</Note>
+
+---
+
+## GET /api/sessions
+
+Returns a list of all currently active sessions and a count.
+
+### Response
+
+<ResponseField name="active_sessions" type="number" required>
+  Total number of sessions currently in memory.
+</ResponseField>
+
+<ResponseField name="sessions" type="object[]" required>
+  Array of session summary objects.
+
+  <Expandable title="session properties">
+    <ResponseField name="session_id" type="string" required>
+      Unique session identifier (UUID).
+    </ResponseField>
+    <ResponseField name="stage" type="string" required>
+      Current stage of the assessment flow: `welcome`, `competency_evaluation`, `waiting_for_answer`, `answer_evaluation`, `report_generation`, or `end`.
+    </ResponseField>
+    <ResponseField name="progress" type="number" required>
+      Estimated progress as an integer from `0` to `100`.
+    </ResponseField>
+    <ResponseField name="chat_length" type="number" required>
+      Number of messages exchanged in this session.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of when the response was generated.
+</ResponseField>
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/sessions
+```
+
+```json
+{
+  "active_sessions": 2,
+  "sessions": [
+    {
+      "session_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+      "stage": "waiting_for_answer",
+      "progress": 45,
+      "chat_length": 12
+    },
+    {
+      "session_id": "7b1a3c9e-2d41-4e88-b17f-5a8c9d0e1f23",
+      "stage": "competency_evaluation",
+      "progress": 10,
+      "chat_length": 3
+    }
+  ],
+  "timestamp": "2025-01-15T16:30:00.000000"
+}
+```
+
+---
+
+## GET /api/session/{session_id}
+
+Returns detailed information about a specific session.
+
+### Path parameters
+
+<ParamField path="session_id" type="string" required>
+  The UUID of the session to retrieve.
+</ParamField>
+
+### Response
+
+<ResponseField name="session_id" type="string" required>
+  Unique session identifier.
+</ResponseField>
+
+<ResponseField name="stage" type="string" required>
+  Current assessment stage: `welcome`, `competency_evaluation`, `waiting_for_answer`, `answer_evaluation`, `report_generation`, or `end`.
+</ResponseField>
+
+<ResponseField name="progress" type="number" required>
+  Estimated completion percentage as an integer from `0` to `100`.
+</ResponseField>
+
+<ResponseField name="applicant" type="object | null">
+  Applicant profile collected during the `background` stage. `null` if not yet collected.
+
+  <Expandable title="applicant properties">
+    <ResponseField name="id" type="string">Applicant identifier.</ResponseField>
+    <ResponseField name="name" type="string">Full name.</ResponseField>
+    <ResponseField name="email" type="string">Email address.</ResponseField>
+    <ResponseField name="phone" type="string | null">Phone number.</ResponseField>
+    <ResponseField name="professional_background" type="object">Years of experience, current position, industry, education level, technical skills, certifications, and relevant projects.</ResponseField>
+    <ResponseField name="motivation" type="string">Applicant's stated motivation for the program.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="program" type="object | null">
+  Selected master's program. `null` if not yet selected.
+
+  <Expandable title="program properties">
+    <ResponseField name="id" type="string">Program identifier.</ResponseField>
+    <ResponseField name="name" type="string">Program name.</ResponseField>
+    <ResponseField name="description" type="string">Program description.</ResponseField>
+    <ResponseField name="school" type="string">School or faculty.</ResponseField>
+    <ResponseField name="duration_semesters" type="number">Program length in semesters.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="chat_length" type="number" required>
+  Number of messages exchanged in this session.
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|---|---|
+| `404` | Session not found. The session ID does not exist in active sessions. |
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/session/3f2504e0-4f89-11d3-9a0c-0305e82c3301
+```
+
+```json
+{
+  "session_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+  "stage": "waiting_for_answer",
+  "progress": 45,
+  "applicant": {
+    "id": "applicant_001",
+    "name": "María González",
+    "email": "maria@example.com",
+    "phone": null,
+    "professional_background": {
+      "years_experience": 8,
+      "current_position": "Coordinadora Académica",
+      "industry": "Educación",
+      "education_level": "Pregrado",
+      "technical_skills": [],
+      "certifications": [],
+      "relevant_projects": []
+    },
+    "motivation": "Fortalecer competencias en TIC aplicadas a la educación"
+  },
+  "program": {
+    "id": "MAESTRIA_TIC",
+    "name": "Maestría en Educación con Énfasis en TIC",
+    "description": "Programa de posgrado orientado a la integración de tecnología en contextos educativos.",
+    "school": "Facultad de Educación",
+    "duration_semesters": 4
+  },
+  "chat_length": 12
+}
+```
+
+---
+
+## POST /api/session/{session_id}/reset
+
+Resets an existing session, clearing all conversation history and returning it to the initial state. The session remains in active sessions after the reset.
+
+### Path parameters
+
+<ParamField path="session_id" type="string" required>
+  The UUID of the session to reset.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  Confirmation message.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of when the reset occurred.
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|---|---|
+| `404` | Session not found. |
+
+### Example
+
+```bash
+curl --request POST \
+  --url http://localhost:8000/api/session/3f2504e0-4f89-11d3-9a0c-0305e82c3301/reset
+```
+
+```json
+{
+  "message": "Session 3f2504e0-4f89-11d3-9a0c-0305e82c3301 reset successfully",
+  "timestamp": "2025-01-15T16:35:00.000000"
+}
+```
+
+<Warning>
+  Resetting a session permanently discards all collected answers and applicant profile data for that session. This action cannot be undone.
+</Warning>
+
+---
+
+## DELETE /api/session/{session_id}
+
+Removes a session from active sessions entirely. This frees the in-memory resources for that session.
+
+### Path parameters
+
+<ParamField path="session_id" type="string" required>
+  The UUID of the session to delete.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  Confirmation message.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of when the deletion occurred.
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|---|---|
+| `404` | Session not found. |
+
+### Example
+
+```bash
+curl --request DELETE \
+  --url http://localhost:8000/api/session/3f2504e0-4f89-11d3-9a0c-0305e82c3301
+```
+
+```json
+{
+  "message": "Session 3f2504e0-4f89-11d3-9a0c-0305e82c3301 deleted successfully",
+  "timestamp": "2025-01-15T16:40:00.000000"
+}
+```
+
+<Note>
+  Deleting a session only removes it from in-memory state. Any conversation turns already persisted to the PostgreSQL database remain accessible via the admin export endpoint.
+</Note>

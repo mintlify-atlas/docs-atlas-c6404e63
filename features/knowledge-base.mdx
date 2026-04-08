@@ -1,0 +1,175 @@
+---
+title: "Knowledge Base"
+description: "Vector knowledge base powered by ChromaDB and OpenAI embeddings for semantic search over programme documents."
+---
+
+The RAP knowledge base stores programme and competency documents as vector embeddings, enabling semantic search during assessment conversations. It is managed by **`KnowledgeBaseManager`** in `src/tools/knowledge_base.py`.
+
+## Architecture
+
+```
+PDF / TXT documents
+        │
+        ▼
+  PyPDF2 extraction
+        │
+        ▼
+RecursiveCharacterTextSplitter   (chunk_size=1000, overlap=200)
+        │
+        ▼
+OpenAI text-embedding-3-small
+        │
+        ▼
+  ChromaDB collection             ./data/chroma  (cosine similarity)
+        │
+        ▼
+KnowledgeBaseManager.search_knowledge_base(query, n_results)
+```
+
+## Storage
+
+ChromaDB is configured as a persistent client, so all vectors survive process restarts:
+
+```python
+self.client = chromadb.PersistentClient(
+    path=settings.chroma_persist_directory,   # default: "./data/chroma"
+    settings=ChromaSettings(
+        anonymized_telemetry=False,
+        allow_reset=True
+    )
+)
+
+self.collection = self.client.get_or_create_collection(
+    name="vap_knowledge_base",
+    metadata={"hnsw:space": "cosine"}
+)
+```
+
+The collection uses **cosine similarity** as the distance metric, so returned distances are converted to similarity scores with `similarity = 1 - distance`.
+
+## Embeddings
+
+Embeddings are generated with OpenAI's `text-embedding-3-small` model, configured via:
+
+```python
+self.embeddings = OpenAIEmbeddings(
+    model=settings.embedding_model,   # "text-embedding-3-small"
+    api_key=settings.openai_api_key
+)
+```
+
+The `EMBEDDING_MODEL` environment variable can override the model name.
+
+<Note>
+  If `OPENAI_API_KEY` is not set, the embeddings object will not be initialised and
+  `_generate_embeddings()` will raise a `ValueError`. ChromaDB's built-in default embeddings
+  are used as a fallback when documents are added without explicit vectors.
+</Note>
+
+## Loading Programme Documents
+
+To ingest a new PDF programme document:
+
+```python
+kb = KnowledgeBaseManager()
+kb.load_program_document("MEMTIC.pdf")
+```
+
+`load_program_document()` delegates to `process_document()`, which:
+
+1. Extracts text via `PyPDF2.PdfReader`, reading every page.
+2. Splits the text into chunks using `RecursiveCharacterTextSplitter` with the separators `["\n\n", "\n", ". ", " ", ""]`.
+3. Wraps each chunk in a `langchain.schema.Document` with metadata:
+
+```python
+{
+    "source": "<file_path>",
+    "chunk_id": <int>,
+    "document_type": "programa_maestria",
+    "total_chunks": <int>
+}
+```
+
+4. Adds all chunks to the ChromaDB collection via `add_documents_to_knowledge_base()`.
+
+Plain `.txt` files are also supported. Any other extension raises a `ValueError`.
+
+## Processing New PDFs via CLI
+
+Use the `embeddings` subcommand from `main.py` to process and index new documents without starting the full API server:
+
+```bash
+python main.py embeddings
+```
+
+This command initialises `KnowledgeBaseManager` (which connects to the persisted ChromaDB directory) and loads any PDFs in the configured data directory.
+
+<Tip>
+  Run `python main.py info` to see current statistics — total documents, distribution by type,
+  and source files — without touching the collection.
+</Tip>
+
+## Semantic Search
+
+```python
+results = kb.search_knowledge_base(query="competencias TIC en educación", n_results=5)
+```
+
+Each result in the returned list contains:
+
+| Key | Type | Description |
+|---|---|---|
+| `id` | `str` | Unique chunk identifier (`{stem}_chunk_{n}`) |
+| `content` | `str` | The text chunk |
+| `metadata` | `dict` | Source file, chunk index, document type |
+| `similarity` | `float` | Cosine similarity score (0.0–1.0) |
+
+The higher-level helper `get_program_context(query)` calls `search_knowledge_base` with `n_results=3` and formats the chunks into a single string ready to be injected into an LLM prompt:
+
+```
+[Relevancia: 87.3%]
+<chunk text>
+
+---
+
+[Relevancia: 79.1%]
+<chunk text>
+```
+
+## Resetting the Knowledge Base
+
+To wipe all stored documents and start fresh:
+
+```python
+kb.reset_knowledge_base()
+```
+
+This deletes the `vap_knowledge_base` collection entirely and recreates an empty one with the same cosine-similarity configuration.
+
+<Warning>
+  `reset_knowledge_base()` is irreversible. Re-index all programme documents afterwards using
+  `load_program_document()` or the `python main.py embeddings` CLI command.
+</Warning>
+
+## Monitoring with the Stats Endpoint
+
+`GET /api/stats` (defined in `src/api.py`) reports global system statistics including knowledge-base metrics derived from `get_knowledge_base_stats()`:
+
+```json
+{
+  "total_documents": 142,
+  "document_types": {
+    "programa_maestria": 142
+  },
+  "sources": ["./MEMTIC.pdf"],
+  "has_program_data": true
+}
+```
+
+You can also call `get_knowledge_base_stats()` directly:
+
+```python
+stats = kb.get_knowledge_base_stats()
+print(stats["total_documents"])      # Total chunks in collection
+print(stats["has_program_data"])     # True if "programa_maestria" type is present
+```

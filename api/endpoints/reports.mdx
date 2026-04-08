@@ -1,0 +1,177 @@
+---
+title: "Reports"
+description: "Retrieve personalized assessment reports for applicants and access pre-built demo reports for UI testing."
+---
+
+Reports are generated at the end of a completed assessment. Each report contains an overall score, identified strengths, areas to improve, and a personalized learning path with recommendations for each competency.
+
+---
+
+## GET /api/report/{session_id}
+
+Returns the `StudentReport` for a completed assessment session.
+
+The report is either retrieved from cache (if the session already generated one) or generated on demand using the `ReportGenerator`. The report uses all responses collected during the `assessment` stage.
+
+### Path parameters
+
+<ParamField path="session_id" type="string" required>
+  The UUID of the completed assessment session.
+</ParamField>
+
+### Response
+
+<ResponseField name="assessment_id" type="string" required>
+  Unique identifier for this assessment.
+</ResponseField>
+
+<ResponseField name="applicant_name" type="string" required>
+  Full name of the applicant.
+</ResponseField>
+
+<ResponseField name="program_name" type="string" required>
+  Name of the master's program being evaluated.
+</ResponseField>
+
+<ResponseField name="overall_score" type="number" required>
+  Weighted overall score on a scale of `1.0` to `5.0`.
+</ResponseField>
+
+<ResponseField name="strengths" type="string[]" required>
+  List of identified strength descriptions. Each item is a markdown-formatted paragraph highlighting a specific competency area and its relevance to the applicant's background.
+</ResponseField>
+
+<ResponseField name="areas_to_improve" type="string[]" required>
+  List of improvement area descriptions. Each item is a markdown-formatted paragraph describing a competency gap and how the program addresses it.
+</ResponseField>
+
+<ResponseField name="personalized_path" type="object[]" required>
+  Ordered list of personalized recommendations, one per evaluated competency.
+
+  <Expandable title="PersonalizedRecommendation properties">
+    <ResponseField name="competency_id" type="string" required>
+      Identifier of the competency this recommendation applies to.
+    </ResponseField>
+    <ResponseField name="action" type="string" required>
+      Recommended action for this competency. Examples: `"skip"`, `"take_course"`, `"take_micro_credential"`, `"review"`.
+    </ResponseField>
+    <ResponseField name="reason" type="string" required>
+      Explanation of why this action is recommended for the applicant, referencing their score and background.
+    </ResponseField>
+    <ResponseField name="suggested_courses" type="string[]">
+      Optional list of specific course or module names suggested for this competency.
+    </ResponseField>
+    <ResponseField name="estimated_time_hours" type="number | null">
+      Estimated time in hours to complete the recommended action.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="estimated_completion_time" type="string" required>
+  Human-readable estimate of program completion time based on the applicant's profile.
+</ResponseField>
+
+<ResponseField name="next_steps" type="string[]" required>
+  Actionable next steps for the applicant to take before or at program start.
+</ResponseField>
+
+<ResponseField name="generated_at" type="string" required>
+  ISO 8601 timestamp of when the report was generated.
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|---|---|
+| `404` | Session not found. |
+| `400` | Assessment not completed. The session exists but no responses have been recorded. |
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/report/3f2504e0-4f89-11d3-9a0c-0305e82c3301
+```
+
+<Note>
+  Use `GET /api/session/{session_id}` to check `current_step` before calling this endpoint. The report is only available when `current_step` is `end` or when `report_ready` is `true` in a chat response.
+</Note>
+
+---
+
+## GET /api/report/demo/{demo_user}
+
+Returns a pre-built, realistic `StudentReport` for UI and UX testing. No active session is required.
+
+Three demo profiles are available, each representing a distinct applicant archetype with different strengths and gaps.
+
+### Path parameters
+
+<ParamField path="demo_user" type="string" required>
+  The demo profile to retrieve. Must be one of:
+
+  | Value | Applicant | Profile summary |
+  |---|---|---|
+  | `maria` | María González Rodríguez | Experienced academic coordinator, strong in research, lower TIC pedagogy score |
+  | `carlos` | Carlos Roberto Mendoza | Systems engineer, strong technical skills, limited pedagogical background |
+  | `ana` | Ana Patricia Herrera | Experienced primary school teacher, strong pedagogy, developing advanced TIC skills |
+</ParamField>
+
+### Response
+
+Same schema as `GET /api/report/{session_id}`. See the [response fields above](#response) for the full structure.
+
+### Errors
+
+| Status | Description |
+|---|---|
+| `404` | Demo user not found. The value is not one of `maria`, `carlos`, or `ana`. |
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/report/demo/ana
+```
+
+```json
+{
+  "assessment_id": "demo_assessment_ana_003",
+  "applicant_name": "Ana Patricia Herrera",
+  "program_name": "Maestría en Educación con Énfasis en TIC",
+  "overall_score": 4.6,
+  "strengths": [
+    "Tu excelente desempeño en **Pedagogía y Didáctica (4.9/5)** refleja claramente tus 15 años de experiencia como docente de primaria...",
+    "Demuestras una **capacidad excepcional de comunicación educativa (4.8/5)**..."
+  ],
+  "areas_to_improve": [
+    "Las **competencias técnicas avanzadas en TIC (3.4/5)** representan tu principal oportunidad de crecimiento..."
+  ],
+  "personalized_path": [
+    {
+      "competency_id": "PEDAGOGIA_DIDACTICA",
+      "action": "Liderar proyectos de mentoría y formación docente desde el primer semestre",
+      "reason": "Tu puntuación excepcional (4.9/5) te posiciona como mentora natural de compañeros con menos experiencia pedagógica.",
+      "suggested_courses": [],
+      "estimated_time_hours": null
+    },
+    {
+      "competency_id": "COMPETENCIAS_TIC_AVANZADAS",
+      "action": "Cursar track acelerado de tecnologías emergentes con enfoque pedagógico",
+      "reason": "Tu sólida base pedagógica (4.9/5) permite enfocarte directamente en aspectos técnicos avanzados sin necesidad de nivelación básica.",
+      "suggested_courses": [],
+      "estimated_time_hours": null
+    }
+  ],
+  "estimated_completion_time": "Basado en tu sólida experiencia pedagógica, estimamos 16-18 meses con track acelerado",
+  "next_steps": [
+    "Solicita el 'Track Acelerado para Educadores Experimentados'...",
+    "Inscríbete al taller intensivo 'Tecnologías Emergentes en Educación: IA, Realidad Virtual y Analíticas de Aprendizaje' (32 horas)."
+  ],
+  "generated_at": "2025-01-15T16:45:00Z"
+}
+```
+
+<Tip>
+  Use the demo endpoint during frontend development to iterate on report UI without needing a live assessment session. Each of the three profiles exercises a different score distribution and recommendation set.
+</Tip>

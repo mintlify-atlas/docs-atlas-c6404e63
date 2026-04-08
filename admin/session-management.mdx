@@ -1,0 +1,229 @@
+---
+title: "Session management"
+description: "Lifecycle of VAP assessment sessions: creation, persistence, in-memory state, and the REST API for listing, inspecting, resetting, and deleting sessions."
+---
+
+Each conversation between an applicant and the VAP agent is tracked as a **session**. Sessions have two layers of state: a persistent record in PostgreSQL and an in-memory `VAPAgent` instance that drives the live conversation.
+
+## Session lifecycle
+
+<Steps>
+  <Step title="Session created">
+    A session is created automatically on the first `POST /api/chat` request when no `session_id` is provided. The backend generates a UUID v4, inserts a row into `evaluation_sessions` with `status = "active"`, and instantiates a `VAPAgent` in the `active_sessions` dictionary.
+  </Step>
+  <Step title="Conversation in progress">
+    Every subsequent message increments the `turn_number` in `conversation_turns` and updates `total_questions_asked` on the session row. The `VAPAgent` instance is looked up by `session_id` from `active_sessions` on each request.
+  </Step>
+  <Step title="Session completed">
+    When the agent determines the assessment is complete (`is_complete = True`), the backend sets `status = "completed"`, records `end_time`, sets `completion_percentage = 100.0`, and writes one `FinalEvaluation` row per evaluated competency.
+  </Step>
+  <Step title="Session expires or is deleted">
+    In-memory sessions expire after `SESSION_TTL_MINUTES` (default 60 minutes) of inactivity. An admin can also reset or delete a session at any time via the management endpoints below.
+  </Step>
+</Steps>
+
+## Persistence — PostgreSQL tables
+
+Session data is stored across three tables defined in `database.py`.
+
+<AccordionGroup>
+  <Accordion title="evaluation_sessions">
+    One row per assessment session.
+
+    | Column | Type | Description |
+    |---|---|---|
+    | `session_id` | `String` (PK) | UUID assigned at creation |
+    | `user_profile` | `JSON` | Applicant data collected during the conversation |
+    | `start_time` | `DateTime` | Server timestamp of row insertion |
+    | `end_time` | `DateTime` | Set when `status` transitions to `completed`; `null` otherwise |
+    | `status` | `String` | `active` or `completed` |
+    | `program_id` | `String` | Defaults to `MEMTIC_2024` |
+    | `total_questions_asked` | `Integer` | Turn count, incremented on each chat message |
+    | `completion_percentage` | `Float` | `0.0`–`100.0`; set to `100.0` on completion |
+  </Accordion>
+
+  <Accordion title="conversation_turns">
+    One row per agent–user exchange.
+
+    | Column | Type | Description |
+    |---|---|---|
+    | `id` | `Integer` (PK) | Auto-incremented |
+    | `session_id` | `String` (FK index) | References `evaluation_sessions.session_id` |
+    | `turn_number` | `Integer` | 1-based sequence within the session |
+    | `agent_message` | `Text` | The question or statement sent by the agent |
+    | `user_response` | `Text` | The applicant's reply |
+    | `timestamp` | `DateTime` | Server timestamp of message receipt |
+    | `message_type` | `String` | `question`, `evaluation`, or `system` |
+    | `competency_focus` | `String` | Competency ID being assessed, or `null` |
+  </Accordion>
+
+  <Accordion title="final_evaluations">
+    One row per competency per session, written on completion.
+
+    | Column | Type | Description |
+    |---|---|---|
+    | `id` | `Integer` (PK) | Auto-incremented |
+    | `session_id` | `String` (FK index) | References `evaluation_sessions.session_id` |
+    | `competency` | `String` | Competency ID |
+    | `level` | `String` | `basico`, `intermedio`, or `avanzado` |
+    | `confidence` | `Float` | `0.0`–`1.0` |
+    | `justification` | `Text` | Agent-generated explanation of the assigned level |
+    | `evidence_sources` | `JSON` | References to specific `conversation_turns` rows, or `null` |
+    | `evaluation_timestamp` | `DateTime` | Server timestamp of record creation |
+  </Accordion>
+</AccordionGroup>
+
+## In-memory session state
+
+The module-level dictionary `active_sessions: Dict[str, VAPAgent]` in `api.py` maps each `session_id` to the `VAPAgent` instance driving that conversation. This state is local to the running process.
+
+<Warning>
+`active_sessions` is not shared across multiple worker processes or container replicas. If the application is restarted, in-memory session state is lost. PostgreSQL retains the persistent record, but resuming a live conversation requires re-creating the `VAPAgent` instance.
+</Warning>
+
+Session TTL is controlled by `SESSION_TTL_MINUTES` in `config.py` (default `60`). The cleanup interval is `SESSION_CLEANUP_INTERVAL_MINUTES` (default `10`).
+
+## `SessionInfo` schema
+
+Several endpoints return a `SessionInfo` object representing the current in-memory state of a session.
+
+<ResponseField name="session_id" type="string" required>
+  UUID of the session.
+</ResponseField>
+
+<ResponseField name="stage" type="string" required>
+  Current conversation stage as reported by the `VAPAgent`. Values: `welcome`, `competency_evaluation`, `waiting_for_answer`, `answer_evaluation`, `report_generation`, `end`, or `error`.
+</ResponseField>
+
+<ResponseField name="progress" type="number" required>
+  Integer from `0` to `100` indicating assessment progress.
+</ResponseField>
+
+<ResponseField name="applicant" type="object">
+  Applicant profile data collected so far. `null` if the profiling stage has not started.
+</ResponseField>
+
+<ResponseField name="program" type="object">
+  Selected program data. `null` if the program has not been identified yet.
+</ResponseField>
+
+<ResponseField name="chat_length" type="number" required>
+  Number of messages exchanged in the current in-memory conversation.
+</ResponseField>
+
+## API endpoints
+
+### `GET /api/sessions`
+
+Lists all sessions currently held in `active_sessions`. Only reflects in-memory state — sessions that have expired or whose process was restarted will not appear.
+
+<AccordionGroup>
+  <Accordion title="Example response">
+    ```json
+    {
+      "active_sessions": 2,
+      "sessions": [
+        {
+          "session_id": "a1b2c3d4-0001-0001-0001-000000000001",
+          "stage": "assessment",
+          "progress": 60,
+          "chat_length": 7
+        },
+        {
+          "session_id": "a1b2c3d4-0003-0003-0003-000000000003",
+          "stage": "welcome",
+          "progress": 0,
+          "chat_length": 1
+        }
+      ],
+      "timestamp": "2026-04-08T09:30:00.123456"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### `GET /api/session/{session_id}`
+
+Returns the full `SessionInfo` object for a single in-memory session.
+
+Returns `404` if `session_id` is not present in `active_sessions`.
+
+<AccordionGroup>
+  <Accordion title="Example response">
+    ```json
+    {
+      "session_id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "stage": "assessment",
+      "progress": 60,
+      "applicant": {
+        "nombre": "María González",
+        "profesion": "Coordinadora Académica",
+        "experiencia_years": 8
+      },
+      "program": {
+        "id": "MEMTIC_2024",
+        "name": "Maestría en Educación con Énfasis en TIC"
+      },
+      "chat_length": 7
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### `POST /api/session/{session_id}/reset`
+
+Resets a session to its initial state by calling `agent.reset_conversation()` on the in-memory `VAPAgent` instance. The PostgreSQL record is **not** modified by this endpoint.
+
+Returns `404` if the session is not in `active_sessions`.
+
+<Tabs>
+  <Tab title="Request">
+    ```bash
+    curl -X POST http://localhost:8000/api/session/a1b2c3d4-0001-0001-0001-000000000001/reset
+    ```
+  </Tab>
+  <Tab title="Response">
+    ```json
+    {
+      "message": "Session a1b2c3d4-0001-0001-0001-000000000001 reset successfully",
+      "timestamp": "2026-04-08T09:35:00.000000"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+Resetting a session clears the agent's in-memory conversation state. To start a fresh database record as well, delete the session and let the next chat message create a new one.
+</Note>
+
+---
+
+### `DELETE /api/session/{session_id}`
+
+Removes the `VAPAgent` instance from `active_sessions`. The PostgreSQL record is retained.
+
+Returns `404` if the session is not in `active_sessions`.
+
+<Tabs>
+  <Tab title="Request">
+    ```bash
+    curl -X DELETE http://localhost:8000/api/session/a1b2c3d4-0001-0001-0001-000000000001
+    ```
+  </Tab>
+  <Tab title="Response">
+    ```json
+    {
+      "message": "Session a1b2c3d4-0001-0001-0001-000000000001 deleted successfully",
+      "timestamp": "2026-04-08T09:40:00.000000"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+Deleting an active session terminates the applicant's conversation mid-assessment. The session record in PostgreSQL will remain in `status = "active"` indefinitely unless updated manually.
+</Warning>

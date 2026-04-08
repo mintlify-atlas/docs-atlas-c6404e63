@@ -1,0 +1,128 @@
+---
+title: "Chat"
+description: "Send messages to the RAP assessment agent and receive responses with suggested options and stage tracking."
+---
+
+## POST /api/chat
+
+The primary endpoint for interacting with the VAP assessment agent. Each call exchanges a single message and returns the agent's reply along with session state information.
+
+If you omit `session_id`, a new UUID is generated and returned in the response. Save that value and include it in every subsequent request to maintain conversation continuity.
+
+### Request body
+
+<ParamField body="message" type="string" required>
+  The user's chat message. This is the text sent to the assessment agent.
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  An existing session identifier. Omit this field to start a new conversation — the API will generate and return a new UUID.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  The agent's response text for this turn of the conversation.
+</ResponseField>
+
+<ResponseField name="session_id" type="string" required>
+  The session identifier for this conversation. Save this value and pass it back in every follow-up request.
+</ResponseField>
+
+<ResponseField name="options" type="string[]">
+  An optional list of suggested reply strings to display as quick-action buttons in the UI. May be empty.
+</ResponseField>
+
+<ResponseField name="current_step" type="string" required>
+  The current stage of the LangGraph assessment flow. Common values:
+
+  | Value | Description |
+  |---|---|
+  | `welcome` | Initial state — greeting and orientation |
+  | `competency_evaluation` | Agent is selecting the next question |
+  | `waiting_for_answer` | A question has been asked; waiting for the applicant's response |
+  | `answer_evaluation` | The agent is scoring the most recent answer |
+  | `report_generation` | All questions answered; generating the student report |
+  | `end` | Assessment complete — report is ready to fetch |
+  | `error` | An error occurred during processing |
+</ResponseField>
+
+<ResponseField name="can_continue" type="boolean" required>
+  Whether the conversation can accept further messages. When `false`, the session has ended.
+</ResponseField>
+
+<ResponseField name="metadata" type="object" required>
+  Additional context about the current state of the conversation, such as competency being evaluated.
+
+  <Expandable title="properties">
+    <ResponseField name="*" type="any">
+      Keys and values vary depending on the current step and agent state.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="is_complete" type="boolean | null">
+  Indicates whether the full assessment has been completed. `null` while the assessment is still in progress.
+</ResponseField>
+
+<ResponseField name="report_ready" type="boolean | null">
+  Indicates whether a report has been generated and is ready to fetch via `GET /api/report/{session_id}`. `null` until assessment completes.
+</ResponseField>
+
+---
+
+## Examples
+
+### Start a new conversation
+
+Omit `session_id` to begin a fresh assessment session. The response contains the new `session_id` to use in follow-up requests.
+
+```bash
+curl --request POST \
+  --url http://localhost:8000/api/chat \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "message": "Hola, me gustaría comenzar la evaluación"
+  }'
+```
+
+### Continue an existing conversation
+
+Pass the `session_id` received from the previous response to continue the same session.
+
+```bash
+curl --request POST \
+  --url http://localhost:8000/api/chat \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "message": "Soy coordinadora académica con 8 años de experiencia en educación básica.",
+    "session_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+  }'
+```
+
+### Response example
+
+```json
+{
+  "message": "¡Bienvenida! Soy el asistente de evaluación de competencias del programa de Maestría en Educación con Énfasis en TIC. Para comenzar, cuéntame un poco sobre tu experiencia profesional.",
+  "session_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+  "options": [
+    "Tengo experiencia en docencia",
+    "Trabajo en gestión educativa",
+    "Vengo del sector tecnológico"
+  ],
+  "current_step": "background",
+  "can_continue": true,
+  "metadata": {},
+  "is_complete": null,
+  "report_ready": null
+}
+```
+
+<Note>
+  The `session_id` in the response is the authoritative identifier for the session. Always use the value from the response, not a client-generated value, to ensure consistency.
+</Note>
+
+<Tip>
+  When `report_ready` becomes `true`, call `GET /api/report/{session_id}` to retrieve the full student report.
+</Tip>

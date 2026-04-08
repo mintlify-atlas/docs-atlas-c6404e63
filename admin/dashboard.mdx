@@ -1,0 +1,322 @@
+---
+title: "Admin dashboard"
+description: "Overview of the expert review dashboard, session summary endpoint, and JSON export format for completed evaluations."
+---
+
+The admin dashboard is the primary interface for academic experts to monitor VAP assessment sessions, inspect individual conversations, and download evaluation data for offline review.
+
+## Accessing the dashboard
+
+The dashboard is served by the React frontend at the `/admin` route. Navigating to that URL renders the `Admin` page, which wraps the full `AdminDashboard` component inside `AdminGuard`.
+
+<Note>
+Access is protected by a client-side password check (`AdminGuard`). The session token is stored in `sessionStorage` under the key `vap_admin_auth` and is cleared when the browser tab is closed.
+</Note>
+
+## Summary cards
+
+When the dashboard loads it calls `GET /api/admin/sessions/summary` and displays four aggregate counters at the top of the page:
+
+| Card | Value |
+|---|---|
+| Total sessions | Total number of rows in `evaluation_sessions` |
+| Completed | Sessions with `status = "completed"` |
+| Active | Sessions with `status = "active"` |
+| Abandoned | Sessions with `status = "abandoned"` |
+
+## Sessions table
+
+Below the summary cards, a filterable table lists every session returned by the summary endpoint. Columns:
+
+- **Session ID** — UUID assigned at conversation start
+- **User** — First 50 characters of `user_profile.initial_message`
+- **Status** — `completed`, `active`, or `abandoned`
+- **Evaluations** — Count of `FinalEvaluation` rows for the session
+- **Completion** — Percentage (0–100) stored on the session record
+- **Duration** — Computed from `start_time` and `end_time`
+- **Started** — `start_time` formatted in `es-ES` locale
+- **Actions** — View details dialog or download JSON export
+
+Filters available: free-text search across session ID and user profile, status dropdown, and completion percentage bucket (100 %, partial, 0 %).
+
+## API endpoints
+
+### `GET /api/admin/sessions/summary`
+
+Returns a summary of every session stored in PostgreSQL, ordered by insertion order.
+
+**Response schema**
+
+<ResponseField name="total_sessions" type="number" required>
+  Total number of evaluation sessions in the database.
+</ResponseField>
+
+<ResponseField name="sessions" type="array" required>
+  List of session summary objects.
+
+  <Expandable title="session object properties">
+    <ResponseField name="session_id" type="string">
+      UUID that identifies the session.
+    </ResponseField>
+    <ResponseField name="user_profile" type="object">
+      JSON object stored when the session was created. Initially contains `initial_message`; updated as the conversation progresses.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      `active`, `completed`, or `abandoned`.
+    </ResponseField>
+    <ResponseField name="start_time" type="string">
+      ISO 8601 timestamp of session creation.
+    </ResponseField>
+    <ResponseField name="end_time" type="string">
+      ISO 8601 timestamp of session completion. `null` if the session is still active.
+    </ResponseField>
+    <ResponseField name="evaluations_count" type="number">
+      Number of `FinalEvaluation` rows associated with this session.
+    </ResponseField>
+    <ResponseField name="completion_percentage" type="number">
+      Value between `0.0` and `100.0`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="export_timestamp" type="string" required>
+  ISO 8601 timestamp of when this response was generated.
+</ResponseField>
+
+<AccordionGroup>
+  <Accordion title="Example response">
+    ```json
+    {
+      "total_sessions": 2,
+      "sessions": [
+        {
+          "session_id": "a1b2c3d4-0001-0001-0001-000000000001",
+          "user_profile": {
+            "initial_message": "Hola, quiero saber más sobre la maestría"
+          },
+          "status": "completed",
+          "start_time": "2026-04-01T10:00:00.000Z",
+          "end_time": "2026-04-01T10:22:17.000Z",
+          "evaluations_count": 3,
+          "completion_percentage": 100.0
+        },
+        {
+          "session_id": "a1b2c3d4-0002-0002-0002-000000000002",
+          "user_profile": {
+            "initial_message": "Buenos días"
+          },
+          "status": "active",
+          "start_time": "2026-04-08T09:15:00.000Z",
+          "end_time": null,
+          "evaluations_count": 0,
+          "completion_percentage": 0.0
+        }
+      ],
+      "export_timestamp": "2026-04-08T09:30:00.123456"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### `GET /api/admin/export/{session_id}`
+
+Returns the full structured record of a single session, formatted for expert review. The dashboard uses this endpoint both for the detail dialog and for the "Download JSON" action.
+
+**Path parameter**
+
+<ResponseField name="session_id" type="string" required>
+  UUID of the session to export. Returns `404` if the session does not exist in the database.
+</ResponseField>
+
+**Response schema**
+
+<ResponseField name="session_id" type="string" required>
+  UUID of the exported session.
+</ResponseField>
+
+<ResponseField name="export_timestamp" type="string" required>
+  ISO 8601 timestamp of the export request.
+</ResponseField>
+
+<ResponseField name="user_profile" type="object" required>
+  Applicant data collected during the conversation and stored on the `evaluation_sessions` row.
+</ResponseField>
+
+<ResponseField name="conversation_summary" type="object" required>
+  High-level metrics for the session.
+
+  <Expandable title="conversation_summary properties">
+    <ResponseField name="status" type="string">
+      `active` or `completed`.
+    </ResponseField>
+    <ResponseField name="duration_minutes" type="number">
+      Elapsed time in minutes, computed from `start_time` and `end_time`. `null` if the session has not ended.
+    </ResponseField>
+    <ResponseField name="total_interactions" type="number">
+      Number of conversation turns recorded in `conversation_turns`.
+    </ResponseField>
+    <ResponseField name="completion_percentage" type="number">
+      Value between `0.0` and `100.0`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="full_conversation" type="array" required>
+  Ordered list of every conversation turn.
+
+  <Expandable title="turn object properties">
+    <ResponseField name="turn" type="number">
+      1-based turn index.
+    </ResponseField>
+    <ResponseField name="agent_message" type="string">
+      The message sent by the VAP agent.
+    </ResponseField>
+    <ResponseField name="user_response" type="string">
+      The applicant's reply.
+    </ResponseField>
+    <ResponseField name="timestamp" type="string">
+      ISO 8601 timestamp of the turn.
+    </ResponseField>
+    <ResponseField name="message_type" type="string">
+      `question`, `evaluation`, or `system`.
+    </ResponseField>
+    <ResponseField name="competency_focus" type="string">
+      Competency ID being assessed in this turn, or `null`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="agent_evaluations" type="array" required>
+  One object per competency assessed during the session.
+
+  <Expandable title="evaluation object properties">
+    <ResponseField name="competency" type="string">
+      Competency ID (e.g., `PEDAGOGIA_TIC`).
+    </ResponseField>
+    <ResponseField name="level" type="string">
+      `basico`, `intermedio`, or `avanzado`.
+    </ResponseField>
+    <ResponseField name="confidence" type="number">
+      Confidence score between `0.0` and `1.0`.
+    </ResponseField>
+    <ResponseField name="justification" type="string">
+      Human-readable explanation of the assigned level, including the number of questions answered and the average score.
+    </ResponseField>
+    <ResponseField name="evidence_sources" type="object">
+      References to specific `ConversationTurn` rows used as evidence, or `null`.
+    </ResponseField>
+    <ResponseField name="timestamp" type="string">
+      ISO 8601 timestamp of when the evaluation was recorded.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="evaluation_summary" type="object" required>
+  Aggregate statistics across all competency evaluations.
+
+  <Expandable title="evaluation_summary properties">
+    <ResponseField name="competencies_evaluated" type="number">
+      Number of competencies with a `FinalEvaluation` record.
+    </ResponseField>
+    <ResponseField name="average_confidence" type="number">
+      Mean confidence across all evaluations. `0` if no evaluations exist.
+    </ResponseField>
+    <ResponseField name="evaluations_by_level" type="object">
+      Map of level label to count. Example: `{"basico": 1, "avanzado": 2}`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<AccordionGroup>
+  <Accordion title="Example response">
+    ```json
+    {
+      "session_id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "export_timestamp": "2026-04-08T09:45:00.000000",
+      "user_profile": {
+        "initial_message": "Hola, quiero saber más sobre la maestría",
+        "nombre": "María González",
+        "experiencia_docente": "8 años"
+      },
+      "conversation_summary": {
+        "status": "completed",
+        "duration_minutes": 22.28,
+        "total_interactions": 9,
+        "completion_percentage": 100.0
+      },
+      "full_conversation": [
+        {
+          "turn": 1,
+          "agent_message": "Hola, bienvenida al proceso de valoración. ¿Cuál es tu nombre y formación académica?",
+          "user_response": "Hola, quiero saber más sobre la maestría",
+          "timestamp": "2026-04-01T10:00:05.000Z",
+          "message_type": "question",
+          "competency_focus": null
+        },
+        {
+          "turn": 2,
+          "agent_message": "Gracias, María. Cuéntame sobre tu experiencia con el uso de tecnología en el aula.",
+          "user_response": "He implementado plataformas LMS y diseñado recursos digitales durante 5 años.",
+          "timestamp": "2026-04-01T10:03:22.000Z",
+          "message_type": "question",
+          "competency_focus": "PEDAGOGIA_TIC"
+        }
+      ],
+      "agent_evaluations": [
+        {
+          "competency": "PEDAGOGIA_TIC",
+          "level": "intermedio",
+          "confidence": 0.72,
+          "justification": "Evaluación basada en 3 pregunta(s). Puntuación promedio: 3.7/5. Demuestra nivel intermedio en esta competencia.",
+          "evidence_sources": null,
+          "timestamp": "2026-04-01T10:22:17.000Z"
+        },
+        {
+          "competency": "INVESTIGACION_EDUCATIVA",
+          "level": "avanzado",
+          "confidence": 0.88,
+          "justification": "Evaluación basada en 3 pregunta(s). Puntuación promedio: 4.8/5. Demuestra nivel avanzado en esta competencia.",
+          "evidence_sources": null,
+          "timestamp": "2026-04-01T10:22:17.000Z"
+        },
+        {
+          "competency": "COMUNICACION_OE",
+          "level": "intermedio",
+          "confidence": 0.68,
+          "justification": "Evaluación basada en 3 pregunta(s). Puntuación promedio: 3.9/5. Demuestra nivel intermedio en esta competencia.",
+          "evidence_sources": null,
+          "timestamp": "2026-04-01T10:22:17.000Z"
+        }
+      ],
+      "evaluation_summary": {
+        "competencies_evaluated": 3,
+        "average_confidence": 0.76,
+        "evaluations_by_level": {
+          "intermedio": 2,
+          "avanzado": 1
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Session detail dialog
+
+Clicking the eye icon on any row in the sessions table opens a modal dialog (`SessionDetailDialog`) that fetches the same export endpoint and renders the data across three tabs:
+
+<Tabs>
+  <Tab title="General information">
+    Displays `user_profile` key-value pairs alongside the conversation's `duration_minutes` and `total_interactions`.
+  </Tab>
+  <Tab title="Conversation">
+    Renders each turn in a chat-bubble layout — agent messages on the left, user responses indented on the right — with timestamps.
+  </Tab>
+  <Tab title="Evaluations">
+    Shows the three aggregate cards (`competencies_evaluated`, `average_confidence`, `evaluations_by_level`) and an expandable accordion per competency containing its level, confidence percentage, and justification text.
+  </Tab>
+</Tabs>
+
+The dialog also exposes an "Export JSON" button that triggers a direct browser download of the full export payload as `session_{id}_complete_export.json`.

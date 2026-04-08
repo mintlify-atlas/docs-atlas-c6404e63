@@ -1,0 +1,180 @@
+---
+title: "Report Generation"
+description: "How RAP generates, caches, and delivers personalised student reports after an assessment is completed."
+---
+
+Once an applicant finishes the 8-question assessment, the **`ReportGenerator`** uses an LLM to produce a `StudentReport` that summarises strengths, areas for improvement, and a personalised learning path.
+
+## How a Report Is Generated
+
+`ReportGenerator.generate_student_report()` in `src/tools/report_generator.py` works as follows:
+
+1. Groups all `QuestionResponse` records by `competency_id` and calculates per-competency average scores.
+2. Builds a concise prompt that includes the applicant's professional profile and the per-competency summary.
+3. Sends the prompt to the report LLM model (`gpt-5-2025-08-07` by default, up to 4 096 tokens) with a **100-second timeout**.
+4. Parses the JSON response and wraps it in a `StudentReport` object.
+5. The report is cached at `ConversationState.misc["generated_report"]` so it is never regenerated for the same session.
+
+<Warning>
+  If the LLM response cannot be parsed as valid JSON, `generate_student_report` raises an
+  exception — there is no silent fallback. Ensure the model is reachable before starting an
+  assessment session.
+</Warning>
+
+## The `StudentReport` Model
+
+Defined in `src/schemas/models.py`:
+
+```python
+class StudentReport(BaseModel):
+    assessment_id: str
+    applicant_name: str
+    program_name: str
+    overall_score: float                              # Average of all LLM scores (1–5 scale)
+    strengths: List[str]
+    areas_to_improve: List[str]
+    personalized_path: List[PersonalizedRecommendation]
+    estimated_completion_time: str
+    next_steps: List[str]
+    generated_at: datetime
+```
+
+Each item in `personalized_path` is a `PersonalizedRecommendation`:
+
+```python
+class PersonalizedRecommendation(BaseModel):
+    competency_id: str
+    action: str        # e.g. "skip", "take_course", "take_micro_credential", "review"
+    reason: str
+    suggested_courses: List[str]
+    estimated_time_hours: Optional[int]
+```
+
+## Retrieving a Report
+
+After the chat step signals `report_ready=True`, the frontend calls:
+
+```
+GET /api/report/{session_id}
+```
+
+The endpoint (defined in `src/api.py`) checks `session_state.misc["generated_report"]` first. If the cached report exists, it is returned immediately. If not, `ReportGenerator.generate_student_report()` is called on-demand.
+
+```
+404  — session not found
+400  — assessment not yet completed
+200  — StudentReport JSON
+```
+
+## Demo Reports
+
+Three pre-built persona reports are available without completing an assessment. They are served by:
+
+```
+GET /api/report/demo/{demo_user}
+```
+
+Available values for `{demo_user}`: `maria`, `carlos`, `ana`.
+
+<Tabs>
+  <Tab title="María González">
+    **Role:** Coordinadora Académica — 8 years in education.
+
+    **Overall score:** 4.2 / 5
+
+    **Profile summary:** Strong in academic research (5.0/5) and oral/written communication (4.5/5). Main growth area is Pedagogía con Énfasis en TIC (3.2/5). Recommended path includes an introductory *Fundamentos de Pedagogía Digital* module (40 hours) before the main programme.
+
+    **Estimated completion:** 18–20 months (part-time).
+  </Tab>
+  <Tab title="Carlos Mendoza">
+    **Role:** Ingeniero en Sistemas — 12 years in technology.
+
+    **Overall score:** 3.7 / 5
+
+    **Profile summary:** Exceptional technical/TIC competency (4.8/5) and project management (4.2/5). Fundamental pedagogical competencies (2.8/5) and educational communication (3.1/5) need structured development. Recommended path begins with an 80-hour *Diplomado en Fundamentos Pedagógicos para Profesionales TIC*.
+
+    **Estimated completion:** 20–22 months (with pedagogical levelling included).
+  </Tab>
+  <Tab title="Ana Herrera">
+    **Role:** Docente de Primaria — 15 years in the classroom.
+
+    **Overall score:** 4.6 / 5
+
+    **Profile summary:** Exceptional pedagogy and didactics (4.9/5), educational communication (4.8/5), and understanding of learning processes (4.7/5). Main growth area is advanced TIC skills (3.4/5) and technology-mediated learning design (3.6/5). Qualifies for the accelerated educator track.
+
+    **Estimated completion:** 16–18 months (accelerated track).
+  </Tab>
+</Tabs>
+
+## Full Report JSON Structure
+
+<Accordion title="Example: María González (demo)">
+
+```json
+{
+  "assessment_id": "demo_assessment_maria_001",
+  "applicant_name": "María González Rodríguez",
+  "program_name": "Maestría en Educación con Énfasis en TIC",
+  "overall_score": 4.2,
+  "strengths": [
+    "Tu excelente desempeño en la competencia de Investigación (5.0/5) es un claro reflejo de tu rol como Coordinadora Académica con 8 años de experiencia.",
+    "Demuestras una sólida capacidad de Comunicación Oral y Escrita (4.5/5), una competencia esencial en tu posición actual.",
+    "Tu experiencia profesional de 8 años en el sector educativo, combinada con tu formación en Pedagogía, te proporciona un contexto práctico invaluable."
+  ],
+  "areas_to_improve": [
+    "El área de Pedagogía con Énfasis en TIC (3.2/5) presenta la oportunidad de crecimiento más significativa.",
+    "Para maximizar el impacto de la maestría, te recomendamos conectar la teoría de las TIC con aplicaciones prácticas en tu entorno laboral."
+  ],
+  "personalized_path": [
+    {
+      "competency_id": "INVESTIGACION_EDUCATIVA",
+      "action": "Profundizar con casos avanzados y metodologías de investigación mixta",
+      "reason": "Tu puntuación excepcional (5.0/5) indica que puedes abordar investigaciones complejas desde el inicio."
+    },
+    {
+      "competency_id": "COMUNICACION_OE",
+      "action": "Aplicar experiencia profesional en presentaciones académicas y escritura de papers",
+      "reason": "Tu sólido desempeño (4.5/5) te posiciona como líder natural en actividades colaborativas."
+    },
+    {
+      "competency_id": "PEDAGOGIA_TIC",
+      "action": "Tomar módulo nivelatorio seguido del curso regular con enfoque práctico",
+      "reason": "El área de mayor crecimiento (3.2/5) requiere refuerzo conceptual."
+    }
+  ],
+  "estimated_completion_time": "Basado en tu sólido perfil profesional, estimamos 18-20 meses con dedicación parcial",
+  "next_steps": [
+    "Agenda una reunión con el director del programa para conversar sobre cómo tus fortalezas en investigación pueden ser aplicadas en proyectos especiales.",
+    "Inscríbete al módulo nivelatorio 'Fundamentos de Pedagogía Digital' (40 horas) 4 semanas antes del inicio.",
+    "Explora marcos teóricos como TPACK y SAMR para familiarizarte con los conceptos del programa.",
+    "Identifica un desafío específico en tu institución donde la integración de TIC podría generar impacto.",
+    "Contacta al coordinador académico para discutir adaptaciones curriculares."
+  ],
+  "generated_at": "2025-01-15T16:45:00Z"
+}
+```
+
+</Accordion>
+
+## Report Caching
+
+The report is stored in the in-memory session state immediately after generation:
+
+```python
+# vap_agent.py — _report_generation_node
+state.misc["generated_report"] = student_report
+```
+
+And served from cache by the API:
+
+```python
+# api.py — get_report endpoint
+if "generated_report" in session_state.misc:
+    return session_state.misc["generated_report"]
+```
+
+<Note>
+  Because sessions are held in memory, a server restart will clear all cached reports. In
+  production, consider persisting reports to the PostgreSQL database alongside the
+  `FinalEvaluation` records.
+</Note>

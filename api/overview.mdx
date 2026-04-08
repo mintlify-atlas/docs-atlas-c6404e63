@@ -1,0 +1,169 @@
+---
+title: "API overview"
+description: "Base URLs, interactive docs, content types, and a complete reference of all available endpoints in the RAP REST API."
+---
+
+## Base URL
+
+| Environment | URL |
+|-------------|-----|
+| Development | `http://localhost:8000` |
+| Production  | `https://<your-railway-app>.up.railway.app` |
+
+All API routes are prefixed with `/api`. The root `/` serves the React frontend; `/api` returns a JSON info object.
+
+## Interactive documentation
+
+The FastAPI backend exposes two auto-generated documentation UIs you can use to explore and test endpoints directly in your browser.
+
+| Interface | Path | Description |
+|-----------|------|-------------|
+| Swagger UI | `/docs` | Interactive playground with request/response schemas |
+| ReDoc | `/redoc` | Readable reference with full schema details |
+
+## API version
+
+The current API version is **1.0.0**, as declared in the `FastAPI` application title (`VAP Chatbot API`).
+
+## Content type
+
+All requests and responses use `application/json`. You do not need to set `Accept` headers explicitly — FastAPI defaults to JSON for all endpoints.
+
+```bash
+# Example: set Content-Type when sending a body
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hola", "session_id": null}'
+```
+
+## CORS
+
+<Note>
+CORS is currently configured with `allow_origins=["*"]`, meaning any origin can call the API. This is intentional for university-internal and development use. For public-facing deployments, restrict allowed origins to known domains at the reverse proxy level.
+</Note>
+
+## Endpoint reference
+
+### Chat
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/chat` | Send a message to the VAP agent; creates or continues an assessment session |
+
+**Request body (`POST /api/chat`)**
+
+```json
+{
+  "message": "Quiero evaluar mis competencias para la maestría",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+`session_id` is optional. If omitted, the server generates a new UUID and returns it in the response. Store this value to continue the conversation.
+
+**Response body**
+
+```json
+{
+  "message": "Bienvenido al sistema VAP...",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "options": [],
+  "current_step": "welcome",
+  "can_continue": true,
+  "metadata": {},
+  "is_complete": null,
+  "report_ready": null
+}
+```
+
+---
+
+### Sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/sessions` | List all in-memory active sessions with current step, progress, and chat length |
+| `GET` | `/api/session/{session_id}` | Get details for a specific session |
+| `POST` | `/api/session/{session_id}/reset` | Reset a session's conversation state without deleting it |
+| `DELETE` | `/api/session/{session_id}` | Remove a session from memory |
+
+---
+
+### Reports
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/report/{session_id}` | Get the generated student report for a completed assessment session |
+| `GET` | `/api/report/demo/{demo_user}` | Get a pre-built demo report (valid values: `maria`, `carlos`, `ana`) |
+
+The demo report endpoint is useful for UI development and stakeholder demos without running a full assessment.
+
+---
+
+### Programs & questions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/programs` | List all available master's programs loaded from `data/programs.json` |
+| `GET` | `/api/programs/{program_id}/competencies` | Get the competencies defined for a given program |
+| `GET` | `/api/questions/competency/{competency_id}` | Get all questions in the bank for a given competency |
+
+---
+
+### System
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check: returns status of agent, API key, data directories, and active session count |
+| `GET` | `/api/stats` | System statistics: total programs, competencies, questions per competency, and active sessions |
+
+The health endpoint returns HTTP `503` when the system is `unhealthy` and HTTP `200` for both `healthy` and `degraded` states.
+
+---
+
+### Admin
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/sessions/summary` | Summary of all sessions stored in PostgreSQL — for the expert review dashboard |
+| `GET` | `/api/admin/export/{session_id}` | Full export of a session (conversation turns, agent evaluations, metadata) for expert review |
+
+<Warning>
+Admin endpoints have no authentication in the current version. They should be protected at the reverse proxy or network level before being exposed publicly. See [Authentication](/api/authentication) for guidance.
+</Warning>
+
+## Complete endpoint table
+
+| Method | Path | Group | Description |
+|--------|------|-------|-------------|
+| `POST` | `/api/chat` | Chat | Main chat endpoint |
+| `GET` | `/api/sessions` | Sessions | List active sessions |
+| `GET` | `/api/session/{session_id}` | Sessions | Get session info |
+| `POST` | `/api/session/{session_id}/reset` | Sessions | Reset session |
+| `DELETE` | `/api/session/{session_id}` | Sessions | Delete session |
+| `GET` | `/api/report/{session_id}` | Reports | Get generated report |
+| `GET` | `/api/report/demo/{demo_user}` | Reports | Get demo report |
+| `GET` | `/api/programs` | Programs | List programs |
+| `GET` | `/api/programs/{program_id}/competencies` | Programs | Get program competencies |
+| `GET` | `/api/questions/competency/{competency_id}` | Questions | Get competency questions |
+| `GET` | `/api/health` | System | Health check |
+| `GET` | `/api/stats` | System | System statistics |
+| `GET` | `/api/admin/sessions/summary` | Admin | All sessions summary |
+| `GET` | `/api/admin/export/{session_id}` | Admin | Export session for expert review |
+
+## Explore by group
+
+<CardGroup cols={2}>
+  <Card title="Chat" icon="message" href="/api/endpoints/chat">
+    The core `/api/chat` endpoint that drives the entire assessment conversation.
+  </Card>
+  <Card title="Sessions" icon="clock" href="/api/endpoints/sessions">
+    Create, inspect, reset, and delete assessment sessions.
+  </Card>
+  <Card title="Reports" icon="chart-bar" href="/api/endpoints/reports">
+    Retrieve student reports and demo reports for UI testing.
+  </Card>
+  <Card title="Admin" icon="gauge" href="/api/endpoints/admin">
+    Expert review dashboard, session exports, and bulk session summaries.
+  </Card>
+</CardGroup>

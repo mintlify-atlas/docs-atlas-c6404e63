@@ -1,0 +1,99 @@
+{
+  "projectType": "saas",
+  "projectName": "RAP — Valoración de Aprendizajes Previos",
+  "projectDescription": "An AI-powered conversational chatbot that evaluates graduate program applicants' prior competencies and generates personalized learning-path reports for Universidad Icesi.",
+  "theme": "luma",
+  "primaryColor": "#5454E9",
+  "lightColor": "#7C7CF3",
+  "darkColor": "#4040C1",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/assessment-flow",
+              "features/competency-evaluation",
+              "features/report-generation",
+              "features/knowledge-base"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/programs-and-competencies",
+              "configuration/llm-models"
+            ]
+          },
+          {
+            "group": "Admin & Operations",
+            "pages": [
+              "admin/dashboard",
+              "admin/session-management",
+              "admin/monitoring"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "API Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/endpoints/chat",
+              "api/endpoints/sessions",
+              "api/endpoints/reports",
+              "api/endpoints/programs",
+              "api/endpoints/admin"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Conversational AI agent (LangGraph + OpenAI) that guides applicants through a structured competency assessment",
+    "Adaptive questioning system using SABER PRO-style questions across multiple difficulty levels",
+    "Vector knowledge base (ChromaDB) for semantic search over master's program documents",
+    "Personalized student reports with strengths, improvement areas, and a tailored learning path",
+    "Academic/admin reports with detailed competency breakdowns for program directors",
+    "Full-stack React + FastAPI architecture with PostgreSQL persistence and Docker deployment",
+    "Admin dashboard for reviewing evaluation sessions and exporting data for expert review",
+    "Demo mode with pre-built sample reports for UI/UX testing"
+  ],
+  "publicApiSurface": [
+    "POST /api/chat — Send a message and receive the agent's next response",
+    "GET /api/session/{session_id} — Retrieve session state and progress",
+    "DELETE /api/session/{session_id} — Delete a session",
+    "POST /api/session/{session_id}/reset — Reset a session to start over",
+    "GET /api/sessions — List all active sessions",
+    "GET /api/report/{session_id} — Get the generated student report for a completed session",
+    "GET /api/report/demo/{demo_user} — Get a demo report (maria | carlos | ana)",
+    "GET /api/programs — List all available master's programs",
+    "GET /api/programs/{program_id}/competencies — List competencies for a program",
+    "GET /api/questions/competency/{competency_id} — Get questions for a competency",
+    "GET /api/stats — Get system statistics",
+    "GET /api/health — Health check endpoint",
+    "GET /api/admin/sessions/summary — Get all sessions summary for expert dashboard",
+    "GET /api/admin/export/{session_id} — Export full session data for expert review"
+  ]
+}

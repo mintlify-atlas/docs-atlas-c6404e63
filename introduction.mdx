@@ -1,0 +1,89 @@
+---
+title: "Introduction"
+description: "RAP is an AI-powered competency assessment platform that helps Universidad Icesi evaluate graduate program applicants and generate personalized learning paths."
+---
+
+## What is RAP?
+
+RAP (Valoración de Aprendizajes Previos) is a conversational AI system that evaluates the prior competencies of applicants to graduate programs at Universidad Icesi. Instead of generic admissions processes, RAP conducts an adaptive interview-style assessment and produces a personalized report that maps each applicant's strengths and gaps to the specific competencies of their chosen master's program.
+
+The system uses an AI agent powered by LangGraph and OpenAI to guide applicants through a structured, natural conversation — asking SABER PRO-style questions, evaluating responses in real time, and ultimately generating a detailed learning path recommendation.
+
+## How it works
+
+<Steps>
+  <Step title="Select a program">
+    The applicant chooses the master's program they are applying to (e.g., Maestría en Educación con Énfasis en TIC).
+  </Step>
+  <Step title="Share your background">
+    The system collects professional background, years of experience, current role, and relevant skills through a conversational form.
+  </Step>
+  <Step title="Complete the assessment">
+    The AI agent conducts an adaptive competency assessment using questions drawn from the program's question bank. Questions span multiple difficulty levels (1–10) and types: multiple choice, open-ended, scenario-based, and SABER PRO contexto.
+  </Step>
+  <Step title="Receive your report">
+    A personalized report is generated with strengths, areas to improve, a tailored learning path, and recommended next steps — all aligned to the specific competencies of the program.
+  </Step>
+</Steps>
+
+## Key capabilities
+
+<CardGroup cols={2}>
+  <Card title="AI-Driven Assessment" icon="robot">
+    A LangGraph-orchestrated agent adapts the assessment in real time based on each applicant's profile and response quality.
+  </Card>
+  <Card title="SABER PRO Questions" icon="circle-question">
+    Questions mirror the standardized Colombian SABER PRO format with contextual scenarios, multiple choice, open-ended, and practical types.
+  </Card>
+  <Card title="Personalized Reports" icon="chart-bar">
+    Each applicant receives a detailed report with scored competencies, specific strengths, improvement areas, and an estimated completion timeline.
+  </Card>
+  <Card title="Knowledge Base" icon="database">
+    ChromaDB powers semantic search over program documents so the agent can answer questions about the master's program accurately.
+  </Card>
+  <Card title="Admin Dashboard" icon="gauge">
+    Program directors can review all assessment sessions, export evaluation data for expert review, and monitor system health.
+  </Card>
+  <Card title="REST API" icon="code">
+    A complete FastAPI-based REST API enables integration with university systems and third-party platforms.
+  </Card>
+</CardGroup>
+
+## Architecture overview
+
+RAP is a full-stack application with a React frontend served alongside a FastAPI backend:
+
+```
+Frontend (React + TypeScript)
+        │
+        ▼
+  FastAPI Backend
+        │
+   ┌────┴────────────────────────┐
+   │                             │
+VAPAgent (LangGraph)      PostgreSQL (Neon)
+   │
+   ├── KnowledgeBaseManager (ChromaDB)
+   ├── QuestionBankManager (JSON)
+   ├── EvaluationEngine
+   └── ReportGenerator (OpenAI)
+```
+
+The frontend guides applicants through the assessment flow. All chat messages go to the `/api/chat` endpoint, which dispatches to the `VAPAgent` — a stateful LangGraph graph that manages conversation turns, selects questions, evaluates answers, and triggers report generation.
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run the system locally in under 10 minutes.
+  </Card>
+  <Card title="Deployment" icon="server" href="/deployment">
+    Deploy to production with Docker or Railway.
+  </Card>
+  <Card title="API Reference" icon="brackets-curly" href="/api/overview">
+    Explore all available REST endpoints.
+  </Card>
+  <Card title="Assessment Flow" icon="arrow-right-arrow-left" href="/features/assessment-flow">
+    Understand the end-to-end evaluation lifecycle.
+  </Card>
+</CardGroup>

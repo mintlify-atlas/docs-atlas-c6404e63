@@ -1,0 +1,97 @@
+---
+title: "LLM models"
+description: "Configure which OpenAI models the RAP backend uses for assessment, report generation, and embeddings."
+---
+
+The backend uses three distinct OpenAI model roles, each configurable via an environment variable.
+
+## Model roles
+
+| Role | Variable | Default | Used for |
+|---|---|---|---|
+| Primary LLM | `PRIMARY_LLM_MODEL` | `gpt-5-mini-2025-08-07` | Conversational assessment agent |
+| Report LLM | `REPORT_LLM_MODEL` | `gpt-5-2025-08-07` | Student and academic report generation |
+| Embedding model | `EMBEDDING_MODEL` | `text-embedding-3-small` | ChromaDB vector store |
+
+Set these in your `.env` file:
+
+```bash
+PRIMARY_LLM_MODEL=gpt-5-mini-2025-08-07
+REPORT_LLM_MODEL=gpt-5-2025-08-07
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+## Primary LLM (`PRIMARY_LLM_MODEL`)
+
+This model drives the LangGraph conversational agent. It receives the full conversation
+history and system prompt on every turn, selects questions, interprets applicant
+responses, and decides when to advance to the next competency.
+
+A faster, lower-cost model is used here because it is invoked on every conversation
+turn and its per-call latency is directly visible to the applicant.
+
+<Note>
+  The `LLM_EVALUATION_TIMEOUT` setting (default `15` seconds) applies to each
+  individual LLM call made by the primary agent. If your model takes longer than
+  this to respond, the agent will time out and surface an error to the user.
+</Note>
+
+## Report LLM (`REPORT_LLM_MODEL`)
+
+This model generates both the student-facing report and the academic/director report
+at the end of an assessment. It is invoked only once per completed session, so a
+larger, higher-quality model is appropriate here even if it is slower or more expensive.
+
+<Note>
+  The `LLM_REPORT_TIMEOUT` setting (default `30` seconds) governs how long the
+  system waits for the report LLM to return a response before timing out.
+</Note>
+
+## Embedding model (`EMBEDDING_MODEL`)
+
+Used by the `KnowledgeBaseManager` to embed program and competency descriptions into
+the ChromaDB vector store. Embeddings are generated at startup and cached on disk
+under `data/chroma/`.
+
+<Warning>
+  If you change `EMBEDDING_MODEL`, you must delete `data/chroma/` and restart the
+  backend. ChromaDB stores the embedding dimensionality at collection-creation time;
+  mixing vectors from different models in the same collection will corrupt search results.
+</Warning>
+
+## Timeout settings
+
+The following timeouts are defined in `config.py` and are not currently exposed as
+environment variables. Modify them directly in the `Settings` class if you need to
+tune them.
+
+| Setting | Default | Description |
+|---|---|---|
+| `GRAPH_PROCESSING_TIMEOUT` | `150` s | Maximum time allowed for a complete LangGraph processing cycle (includes report generation) |
+| `LLM_EVALUATION_TIMEOUT` | `15` s | Maximum time for a single evaluation LLM call |
+| `LLM_REPORT_TIMEOUT` | `30` s | Maximum time for a report generation LLM call |
+| `API_REQUEST_TIMEOUT` | `60` s | General HTTP request timeout for outbound API calls |
+
+## Switching to a different model
+
+To use a different OpenAI model, update the relevant variable in `.env` and restart
+the backend. For example, to use a different primary model:
+
+```bash
+PRIMARY_LLM_MODEL=gpt-4o
+```
+
+<Note>
+  The Anthropic SDK (`anthropic==0.57.1`) is listed in the project's requirements,
+  which means the codebase can be extended to support Claude models. However, as of
+  the current implementation all LLM calls use the OpenAI client and `OPENAI_API_KEY`.
+  Swapping in an Anthropic model requires code changes in the agent and evaluation
+  modules — it is not achievable via environment variables alone.
+</Note>
+
+<Warning>
+  Changing models affects both cost and output quality. The default models were
+  chosen to balance evaluation accuracy, report coherence, and API cost. Thoroughly
+  test any model substitution against the existing evaluation dataset
+  (`data/evaluation_dataset.json`) before deploying to production.
+</Warning>

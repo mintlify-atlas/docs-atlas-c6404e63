@@ -1,0 +1,192 @@
+---
+title: "Competency Evaluation"
+description: "How the RAP evaluation engine scores responses, maps them to competency levels, and drives adaptive question selection."
+---
+
+The competency evaluation layer is composed of three cooperating components:
+
+- **`QuestionBankManager`** — loads questions from `data/questions_optimized.json` and drives adaptive selection.
+- **`VAPAgent._answer_evaluation_node`** — calls the LLM with structured output to score each answer on a 1–5 scale.
+- **`EvaluationEngine`** — calculates weighted scores, determines competency levels, and generates per-competency recommendations.
+
+## Question Types
+
+Questions are classified by the `QuestionType` enum defined in `src/schemas/models.py`:
+
+| Value | Description |
+|---|---|
+| `multiple_choice` | Four-option questions; correct answer is one of A–D |
+| `true_false` | Binary true/false statement; accepts variants like `"verdadero"`, `"v"`, `"yes"` |
+| `open_ended` | Free-text answer scored against keyword presence |
+| `scenario` | Situational problem; scored by text similarity with the ideal answer |
+| `saber_pro_contexto` | SABER PRO-style questions with a rich contextual passage before the question |
+| `conversational` | Dialogue-style prompt designed for natural conversational responses |
+| `practical` | Applied task demonstrating hands-on skills |
+
+<Note>
+  The primary question format in the current question bank is `saber_pro_contexto`. All questions
+  loaded from `data/questions_optimized.json` follow this structure.
+</Note>
+
+## The `Question` Model
+
+Every question is represented by the `Question` Pydantic model from `src/schemas/models.py`:
+
+```python
+class Question(BaseModel):
+    id: str
+    competency_id: str
+    learning_outcome_id: Optional[str]
+    question_type: QuestionType
+    context: str                        # Contextual passage (SABER PRO style)
+    question_text: str
+    options: List[str]                  # Empty for open-ended questions
+    correct_answer: str
+    explanation: str
+    difficulty_level: int               # 1–10 scale (Field(ge=1, le=10, default=5))
+    evaluation_hints: List[str]         # Rubric hints used by the LLM evaluator
+```
+
+## Difficulty Levels
+
+The `difficulty_level` field uses a 1–10 integer scale. The question bank organises questions into named tiers that map to this scale:
+
+| Tier name (key in `questions_by_level`) | Approximate difficulty range | Description |
+|---|---|---|
+| `novato` | 1–3 | Foundational concepts, recall |
+| `principiante` | 3–5 | Basic application |
+| `competente` | 5–7 | Moderate application and analysis |
+| `proficiente` | 7–10 | Complex reasoning and synthesis |
+
+The `EvaluationEngine` also uses a three-bucket enum (`DifficultyLevel`) for weighting:
+
+```python
+class DifficultyLevel(str, Enum):
+    BASIC        = "basic"
+    INTERMEDIATE = "intermediate"
+    ADVANCED     = "advanced"
+```
+
+Difficulty weights applied when tallying point scores:
+
+| Bucket | Weight multiplier |
+|---|---|
+| `basic` | 1.0× |
+| `intermediate` | 1.5× |
+| `advanced` | 2.0× |
+
+## Competency Levels
+
+The `CompetencyLevel` enum defines the five mastery tiers reported per-competency:
+
+```python
+class CompetencyLevel(str, Enum):
+    NOVATO       = "novato"
+    PRINCIPIANTE = "principiante"
+    COMPETENTE   = "competente"
+    PROFICIENTE  = "proficiente"
+    EXPERTO      = "experto"
+```
+
+The mapping from percentage score to level inside `QuestionBankManager.calculate_competency_level()`:
+
+| Correct-answer percentage | Competency level |
+|---|---|
+| ≥ 90 % | `experto` |
+| ≥ 75 % | `proficiente` |
+| ≥ 60 % | `competente` |
+| ≥ 40 % | `principiante` |
+| < 40 % | `novato` |
+
+## LLM Answer Scoring
+
+During the chat assessment, each response is scored by `VAPAgent._answer_evaluation_node` using OpenAI structured output:
+
+```python
+class EvaluationResult(BaseModel):
+    score: int           # 1 (deficiente) → 5 (excelente)
+    justification: str
+```
+
+The LLM receives:
+- The original question text
+- The applicant's free-text response
+
+It returns a structured `EvaluationResult`. The `score` and `justification` are stored as a `QuestionResponse` record:
+
+```python
+class QuestionResponse(BaseModel):
+    question_id: str
+    competency_id: str
+    response: str
+    score: int              # 1–5
+    evaluation_notes: str   # LLM justification
+    timestamp: datetime
+```
+
+If the LLM call times out (default 15 s) or fails, a **default score of 3** is assigned with a fallback note so the session can continue without interruption.
+
+## Score-to-Level Mapping (Report Layer)
+
+After the assessment is complete, `src/api.py` maps the per-competency average LLM score (1–5 scale) to a three-tier level for the database and report:
+
+```python
+if avg_score >= 4.5:
+    level = "avanzado"
+    confidence = 0.85 + (avg_score - 4.5) * 0.10
+elif avg_score >= 3.5:
+    level = "intermedio"
+    confidence = 0.65 + (avg_score - 3.5) * 0.20
+else:
+    level = "basico"
+    confidence = 0.40 + (avg_score - 1.0) * 0.125
+```
+
+| Average LLM score | Report level | Base confidence |
+|---|---|---|
+| ≥ 4.5 / 5 | `avanzado` | 0.85 |
+| ≥ 3.5 / 5 | `intermedio` | 0.65 |
+| < 3.5 / 5 | `basico` | 0.40 |
+
+## `CompetencyEvaluation` Model
+
+Per-competency statistics are tracked in the `CompetencyEvaluation` model:
+
+```python
+class CompetencyEvaluation(BaseModel):
+    competency_id: str
+    questions_asked: int            # Number of questions served for this competency
+    correct_answers: int
+    percentage_score: float         # 0.0–100.0
+    competency_level: CompetencyLevel   # novato → experto
+    response_times: List[float]     # Seconds per answer
+    detailed_responses: List[Dict[str, Any]]
+```
+
+Each `Assessment` holds a list of these objects in `competency_evaluations`, one per evaluated competency.
+
+## Adaptive Question Selection
+
+`QuestionBankManager.get_adaptive_evaluation_plan()` returns a plan that prioritises under-evaluated competencies:
+
+1. **Not yet evaluated** — highest priority (`"not_evaluated"`).
+2. **Fewer than `MIN_QUESTIONS_PER_COMPETENCY` (2) answers** — ensure minimum coverage.
+3. **Needs more questions based on performance** — low/medium performers get 1–2 additional questions.
+4. **Well-evaluated** — no additional questions needed.
+
+The plan distributes the remaining question budget (`MAX_QUESTIONS - questions_answered`) across competencies in priority order. Once the budget is exhausted or all competencies are sufficiently covered, the plan appends `"complete_assessment"`.
+
+```python
+# Simplified excerpt from QuestionBankManager.get_adaptive_evaluation_plan()
+if analysis["questions_answered"] == 0:
+    priority = "high"
+    reason   = "not_evaluated"
+elif analysis["questions_answered"] < MIN_QUESTIONS_PER_COMPETENCY:
+    priority = "high"
+    reason   = "insufficient_questions"
+elif analysis["needs_more_questions"] and analysis["questions_answered"] < 4:
+    priority = "medium"
+    reason   = f"performance_{analysis['performance_level']}"
+```
+
+The level used when selecting a specific question defaults to the `["competente", "principiante", "novato", "proficiente"]` priority order, which starts at the moderate tier to avoid anchoring the session too high or too low.

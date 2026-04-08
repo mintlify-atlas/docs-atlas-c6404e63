@@ -1,0 +1,184 @@
+---
+title: "Programs and competencies"
+description: "How to configure master's programs, competencies, and the question bank loaded at startup."
+---
+
+The RAP backend loads program definitions and questions from two JSON files at startup:
+
+| File | Purpose |
+|---|---|
+| `data/programs.json` | Master's program definitions, including their competency lists |
+| `data/questions_optimized.json` | Optimised question bank loaded by `QuestionBankManager`, indexed by difficulty level |
+
+The base data directory path is controlled by the `DATA_DIRECTORY` environment variable (default `./data`). See [Environment variables](/configuration/environment-variables).
+
+## Viewing current state
+
+Run the following command to inspect the programs, competencies, and question counts
+currently loaded by the system:
+
+```bash
+python main.py info
+```
+
+## Data models
+
+### `MasterProgram`
+
+Defined in `backend/src/schemas/models.py`.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique program identifier (e.g. `MEMTIC_2024`) |
+| `name` | `string` | Human-readable program name |
+| `description` | `string` | Brief description of the program |
+| `school` | `string` | School or faculty offering the program |
+| `duration_semesters` | `integer` | Program length in semesters |
+| `competencies` | `Competency[]` | List of competencies evaluated in this program |
+| `prerequisites` | `string[]` | List of prerequisite descriptions |
+
+### `Competency`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique competency identifier (e.g. `COMUNICACION_OE`) |
+| `name` | `string` | Competency name |
+| `description` | `string` | What this competency covers |
+| `icon` | `string` | Emoji icon displayed in the UI (default `🎯`) |
+| `learning_outcomes` | `string[]` | List of expected learning outcomes |
+| `evaluation_criteria` | `object` | Key-value map of criteria labels to descriptions |
+
+### `Question`
+
+Questions are stored in `data/questions.json` and keyed by `competency_id`.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique question identifier |
+| `competency_id` | `string` | ID of the competency this question assesses |
+| `question_type` | `string` | One of: `multiple_choice`, `true_false`, `open_ended`, `scenario`, `saber_pro_contexto`, `conversational`, `practical` |
+| `context` | `string` | Background context presented before the question |
+| `question_text` | `string` | The question itself |
+| `options` | `string[]` | Answer choices (for `multiple_choice` and `true_false`) |
+| `correct_answer` | `string` | The correct answer or answer key |
+| `explanation` | `string` | Explanation shown after evaluation |
+| `difficulty_level` | `integer` | Difficulty from `1` (easiest) to `10` (hardest), default `5` |
+| `evaluation_hints` | `string[]` | Hints used by the LLM evaluator when scoring open-ended answers |
+
+<Note>
+  `questions.json` uses the richer `CompetencyData` schema (with `resultados_aprendizaje`
+  and `banco_preguntas_base` sub-objects) defined in `models.py`. The fields above
+  describe the flattened `Question` objects used internally after loading.
+</Note>
+
+## Adding a new competency
+
+### 1. Add the competency to `data/programs.json`
+
+<Accordion title="programs.json — minimal example">
+```json
+{
+  "id": "MEMTIC_2024",
+  "name": "Maestría en Educación con Énfasis en TIC",
+  "description": "Program description here.",
+  "school": "Facultad de Educación",
+  "duration_semesters": 4,
+  "prerequisites": [],
+  "competencies": [
+    {
+      "id": "PENSAMIENTO_CRITICO",
+      "name": "Pensamiento Crítico",
+      "description": "Capacity to analyze, evaluate, and construct reasoned arguments.",
+      "icon": "🧠",
+      "learning_outcomes": [
+        "Identifies logical fallacies in academic texts.",
+        "Constructs evidence-based arguments."
+      ],
+      "evaluation_criteria": {
+        "basic": "Recognizes arguments but cannot evaluate their validity.",
+        "proficient": "Evaluates arguments and identifies implicit assumptions.",
+        "expert": "Constructs original arguments and anticipates counterarguments."
+      }
+    }
+  ]
+}
+```
+</Accordion>
+
+### 2. Add questions to `data/questions.json`
+
+The top-level key must match the `id` field of the competency you added.
+
+<Accordion title="questions.json — minimal example">
+```json
+{
+  "PENSAMIENTO_CRITICO": {
+    "nombre": "Pensamiento Crítico",
+    "descripcion_general": "Capacity to analyze, evaluate, and construct reasoned arguments.",
+    "icono": "🧠",
+    "resultados_aprendizaje": [
+      {
+        "id": "RA_PC_1",
+        "descripcion_ra": "Identifies logical fallacies in academic texts.",
+        "preguntas_clave_ejemplo": [
+          "What logical fallacy does the following passage contain, and why?"
+        ],
+        "banco_preguntas_base": [
+          {
+            "tipo": "saber_pro_contexto",
+            "contexto_saber_pro": "A colleague argues: 'This pedagogical approach must work because many teachers use it.'",
+            "pregunta": "Which logical fallacy does this argument commit?",
+            "opciones_saber_pro_originales": [
+              "A. Ad hominem",
+              "B. Appeal to popularity (argumentum ad populum)",
+              "C. False dilemma",
+              "D. Slippery slope"
+            ],
+            "respuesta_correcta_saber_pro_original": "B",
+            "justificacion_saber_pro_original": "The argument assumes something is correct simply because many people believe it.",
+            "pistas_evaluacion_conversacional": [
+              "The respondent identifies that popularity alone does not establish truth.",
+              "The respondent names the fallacy correctly."
+            ]
+          }
+        ],
+        "evidencias_esperadas": [
+          "Names the fallacy and explains why it applies to the passage."
+        ]
+      }
+    ],
+    "criterios_evaluacion_general": {
+      "basic": "Recognizes arguments but cannot evaluate their validity.",
+      "proficient": "Evaluates arguments and identifies implicit assumptions.",
+      "expert": "Constructs original arguments and anticipates counterarguments."
+    }
+  }
+}
+```
+</Accordion>
+
+### 3. Restart the backend
+
+The data files are read at startup. Restart the server after editing them:
+
+```bash
+python main.py api
+```
+
+<Note>
+  The ChromaDB vector store is also rebuilt from the JSON files on startup. If you
+  change competency descriptions, delete `data/chroma/` before restarting so that
+  the embeddings are regenerated from the updated content.
+</Note>
+
+## Removing a competency
+
+1. Remove the competency object from the `competencies` array in `programs.json`.
+2. Remove the matching top-level key from `questions.json`.
+3. Delete `data/chroma/` and restart the backend.
+
+<Warning>
+  Removing a competency that has associated assessment results in the database
+  will leave those records with a dangling `competency_id`. Archive or migrate
+  the data before removing competencies in production.
+</Warning>

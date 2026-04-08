@@ -1,0 +1,295 @@
+---
+title: "Monitoring"
+description: "Health check endpoint, system statistics, Docker HEALTHCHECK configuration, CLI diagnostics, and log format for the RAP backend."
+---
+
+The RAP backend exposes two dedicated endpoints for operational monitoring, a Docker `HEALTHCHECK` directive, and a CLI command that reports system state without starting the HTTP server.
+
+## `GET /api/health`
+
+Returns the overall health of the system and the status of each critical dependency. The HTTP response code reflects the severity of any detected issue:
+
+| Overall status | HTTP code |
+|---|---|
+| `healthy` | `200` |
+| `degraded` | `200` (with a warning logged) |
+| `unhealthy` | `503` |
+| Internal error | `500` |
+
+**Services checked**
+
+| Key | What is verified |
+|---|---|
+| `agent` | Whether the global `VAPAgent` singleton has been initialized |
+| `api_key` | Whether an OpenAI API key is configured |
+| `data_directory` | Whether `settings.data_directory` exists on disk |
+| `chroma_database` | Whether `settings.chroma_persist_directory` exists on disk |
+
+<Note>
+A missing `data_directory` or `chroma_database` downgrades the status to `degraded`. A missing agent or API key makes the status `unhealthy` and returns HTTP 503.
+</Note>
+
+**Response schema**
+
+<ResponseField name="status" type="string" required>
+  Overall system health: `healthy`, `degraded`, or `unhealthy`.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of the health check.
+</ResponseField>
+
+<ResponseField name="services" type="object" required>
+  Per-service status strings.
+
+  <Expandable title="services properties">
+    <ResponseField name="agent" type="string">
+      `healthy` — the global `VAPAgent` instance is initialized.
+    </ResponseField>
+    <ResponseField name="api_key" type="string">
+      `configured` — an OpenAI API key is present.
+    </ResponseField>
+    <ResponseField name="data_directory" type="string">
+      `accessible` or `inaccessible`.
+    </ResponseField>
+    <ResponseField name="chroma_database" type="string">
+      `accessible` or `inaccessible`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="metrics" type="object" required>
+  Session counts at time of the request.
+
+  <Expandable title="metrics properties">
+    <ResponseField name="active_sessions" type="number">
+      Session count reported by the global `VAPAgent` singleton (`get_session_count()`).
+    </ResponseField>
+    <ResponseField name="legacy_sessions" type="number">
+      Length of the `active_sessions` dict (per-session `VAPAgent` instances).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="configuration" type="object" required>
+  Selected settings values for quick reference.
+
+  <Expandable title="configuration properties">
+    <ResponseField name="primary_model" type="string">
+      Value of `settings.primary_llm_model`.
+    </ResponseField>
+    <ResponseField name="session_ttl_minutes" type="number">
+      Value of `settings.session_ttl_minutes` (default `60`).
+    </ResponseField>
+    <ResponseField name="program_id" type="string">
+      Value of `settings.program_id` (default `MEMTIC_2024`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="issues" type="array" required>
+  List of human-readable problem descriptions. Empty when status is `healthy`.
+</ResponseField>
+
+<AccordionGroup>
+  <Accordion title="Healthy response example">
+    ```json
+    {
+      "status": "healthy",
+      "timestamp": "2026-04-08T09:00:00.000000",
+      "services": {
+        "agent": "healthy",
+        "api_key": "configured",
+        "data_directory": "accessible",
+        "chroma_database": "accessible"
+      },
+      "metrics": {
+        "active_sessions": 3,
+        "legacy_sessions": 3
+      },
+      "configuration": {
+        "primary_model": "gpt-5-mini-2025-08-07",
+        "session_ttl_minutes": 60,
+        "program_id": "MEMTIC_2024"
+      },
+      "issues": []
+    }
+    ```
+  </Accordion>
+  <Accordion title="Degraded response example (missing ChromaDB directory)">
+    ```json
+    {
+      "status": "degraded",
+      "timestamp": "2026-04-08T09:05:00.000000",
+      "services": {
+        "agent": "healthy",
+        "api_key": "configured",
+        "data_directory": "accessible",
+        "chroma_database": "inaccessible"
+      },
+      "metrics": {
+        "active_sessions": 0,
+        "legacy_sessions": 0
+      },
+      "configuration": {
+        "primary_model": "gpt-5-mini-2025-08-07",
+        "session_ttl_minutes": 60,
+        "program_id": "MEMTIC_2024"
+      },
+      "issues": [
+        "ChromaDB directory not accessible"
+      ]
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## `GET /api/stats`
+
+Returns aggregate statistics about the question bank and active sessions. Useful for confirming that data files were loaded correctly at startup.
+
+**Response schema**
+
+<ResponseField name="active_sessions" type="number" required>
+  Number of entries in the `active_sessions` dict.
+</ResponseField>
+
+<ResponseField name="total_programs" type="number" required>
+  Number of programs in the knowledge base.
+</ResponseField>
+
+<ResponseField name="total_competencies" type="number" required>
+  Total number of competencies across all programs.
+</ResponseField>
+
+<ResponseField name="questions_by_competency" type="object" required>
+  Map of competency ID to question count.
+</ResponseField>
+
+<ResponseField name="total_questions" type="number" required>
+  Sum of all questions across all competencies.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of the response.
+</ResponseField>
+
+<AccordionGroup>
+  <Accordion title="Example response">
+    ```json
+    {
+      "active_sessions": 2,
+      "total_programs": 1,
+      "total_competencies": 4,
+      "questions_by_competency": {
+        "PEDAGOGIA_TIC": 5,
+        "INVESTIGACION_EDUCATIVA": 5,
+        "COMUNICACION_OE": 5,
+        "GESTION_EDUCATIVA": 5
+      },
+      "total_questions": 20,
+      "timestamp": "2026-04-08T09:10:00.000000"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Docker HEALTHCHECK
+
+The `Dockerfile` configures a `HEALTHCHECK` that polls the health endpoint every 30 seconds:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD sh -c 'curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1'
+```
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `--interval` | `30s` | Time between consecutive checks |
+| `--timeout` | `5s` | Maximum time allowed for a single check |
+| `--start-period` | `10s` | Grace period after container start before failures are counted |
+| `--retries` | `3` | Consecutive failures before the container is marked unhealthy |
+
+The `${PORT}` variable is substituted at runtime by the shell form of `CMD`. Railway overrides the default `PORT=8000` with its own value.
+
+<Tip>
+`curl` is installed explicitly in the `Dockerfile` (`apt-get install -y curl`) to ensure the health check command is available in the slim Python base image.
+</Tip>
+
+---
+
+## CLI info command
+
+Run the following command inside the backend directory (or the Docker container) to inspect system state without starting the HTTP server:
+
+```bash
+python main.py info
+```
+
+The `info` command (`show_info()` in `main.py`) prints:
+
+- Working directory and `settings.data_directory`
+- Active `settings.primary_llm_model`
+- File presence for `data/questions.json` and `MEMTIC.pdf`
+- Question bank statistics: total competencies, total questions
+- Knowledge base statistics: total documents, whether program data is loaded, document sources
+
+Example output:
+
+```text
+🎓 Sistema VAP - Chatbot para Evaluación de Competencias
+============================================================
+📍 Directorio de trabajo: /app
+📁 Directorio de datos: ./data
+🔧 Modelo principal: gpt-5-mini-2025-08-07
+
+📄 Estado de archivos:
+  • questions.json: ✅ Existe
+  • MEMTIC.pdf: ✅ Existe
+
+🔧 Inicializando herramientas...
+
+📊 Banco de Preguntas:
+  • Total competencias: 4
+  • Total preguntas: 20
+
+📚 Base de Conocimientos:
+  • Total documentos: 42
+  • Tiene datos del programa: ✅ Sí
+  • Fuentes: MEMTIC.pdf
+
+🚀 Estado del sistema: ✅ LISTO
+```
+
+Other available CLI commands:
+
+| Command | Description |
+|---|---|
+| `python main.py api` | Start the Uvicorn HTTP server (default) |
+| `python main.py embeddings` | Process `MEMTIC.pdf` and populate ChromaDB |
+| `python main.py chat` | Start an interactive terminal chat session |
+
+---
+
+## Log format
+
+All backend loggers use the following format, configured at startup in `api.py`:
+
+```text
+%(asctime)s - %(name)s - %(levelname)s - %(message)s
+```
+
+Example log lines:
+
+```text
+2026-04-08 09:00:01,234 - src.api - INFO - ✅ Base de datos PostgreSQL inicializada correctamente
+2026-04-08 09:00:05,001 - src.api - INFO - 🌐 API: Recibido POST /chat
+2026-04-08 09:00:05,450 - src.api - WARNING - ⚠️ Sistema en estado degradado: ['ChromaDB directory not accessible']
+2026-04-08 09:00:05,900 - src.api - ERROR - ❌ Error procesando mensaje: Connection refused
+```
+
+The log level is set to `INFO` by default. The logger name corresponds to the Python module path (e.g., `src.api`, `src.agent.vap_agent`).

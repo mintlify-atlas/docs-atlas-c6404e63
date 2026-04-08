@@ -1,0 +1,264 @@
+---
+title: "Programs"
+description: "Browse master's programs, retrieve competencies and assessment questions, and query system statistics."
+---
+
+These endpoints expose the knowledge base content: programs, competencies, and the question bank. They are read-only and do not require an active session.
+
+---
+
+## GET /api/programs
+
+Returns all master's programs available in the system.
+
+### Response
+
+<ResponseField name="programs" type="object[]" required>
+  Array of `MasterProgram` objects.
+
+  <Expandable title="MasterProgram properties">
+    <ResponseField name="id" type="string" required>
+      Unique program identifier (e.g., `"MAESTRIA_TIC"`).
+    </ResponseField>
+    <ResponseField name="name" type="string" required>
+      Full program name.
+    </ResponseField>
+    <ResponseField name="description" type="string" required>
+      Program description.
+    </ResponseField>
+    <ResponseField name="school" type="string" required>
+      School or faculty that offers the program.
+    </ResponseField>
+    <ResponseField name="duration_semesters" type="number" required>
+      Program length in semesters.
+    </ResponseField>
+    <ResponseField name="competencies" type="object[]">
+      Competencies associated with the program. See [Competency properties](#competency-model) below.
+    </ResponseField>
+    <ResponseField name="prerequisites" type="string[]">
+      List of prerequisite descriptions.
+    </ResponseField>
+    <ResponseField name="created_at" type="string">
+      ISO 8601 timestamp of when the program was created.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="count" type="number" required>
+  Total number of programs returned.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of the response.
+</ResponseField>
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/programs
+```
+
+---
+
+## GET /api/programs/{program_id}/competencies
+
+Returns all competencies defined for a specific program.
+
+### Path parameters
+
+<ParamField path="program_id" type="string" required>
+  The identifier of the program (e.g., `"MAESTRIA_TIC"`).
+</ParamField>
+
+### Response
+
+<ResponseField name="program_id" type="string" required>
+  The program identifier from the request.
+</ResponseField>
+
+<ResponseField name="competencies" type="object[]" required>
+  Array of `Competency` objects. See the [Competency model](#competency-model) section below for field details.
+</ResponseField>
+
+<ResponseField name="count" type="number" required>
+  Number of competencies returned.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of the response.
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|---|---|
+| `404` | No competencies found for the given program ID. |
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/programs/MAESTRIA_TIC/competencies
+```
+
+---
+
+## GET /api/questions/competency/{competency_id}
+
+Returns all assessment questions available for a specific competency.
+
+### Path parameters
+
+<ParamField path="competency_id" type="string" required>
+  The identifier of the competency (e.g., `"INVESTIGACION_EDUCATIVA"`).
+</ParamField>
+
+### Response
+
+<ResponseField name="competency_id" type="string" required>
+  The competency identifier from the request.
+</ResponseField>
+
+<ResponseField name="questions" type="object[]" required>
+  Array of `Question` objects. See the [Question model](#question-model) section below for field details.
+</ResponseField>
+
+<ResponseField name="count" type="number" required>
+  Number of questions returned.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of the response.
+</ResponseField>
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/questions/competency/INVESTIGACION_EDUCATIVA
+```
+
+---
+
+## GET /api/stats
+
+Returns aggregate statistics about the current state of the system.
+
+### Response
+
+<ResponseField name="active_sessions" type="number" required>
+  Number of sessions currently active in memory.
+</ResponseField>
+
+<ResponseField name="total_programs" type="number" required>
+  Total number of programs loaded from the knowledge base.
+</ResponseField>
+
+<ResponseField name="total_competencies" type="number" required>
+  Total number of competencies across all programs.
+</ResponseField>
+
+<ResponseField name="questions_by_competency" type="object" required>
+  Map of `competency_id` to question count. Each key is a competency identifier and each value is the number of questions available for that competency.
+</ResponseField>
+
+<ResponseField name="total_questions" type="number" required>
+  Total number of questions across all competencies.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp of the response.
+</ResponseField>
+
+### Example
+
+```bash
+curl --request GET \
+  --url http://localhost:8000/api/stats
+```
+
+```json
+{
+  "active_sessions": 2,
+  "total_programs": 1,
+  "total_competencies": 5,
+  "questions_by_competency": {
+    "INVESTIGACION_EDUCATIVA": 12,
+    "PEDAGOGIA_TIC": 10,
+    "COMUNICACION_OE": 8,
+    "GESTION_PROYECTOS": 9,
+    "PENSAMIENTO_CRITICO": 11
+  },
+  "total_questions": 50,
+  "timestamp": "2025-01-15T16:00:00.000000"
+}
+```
+
+---
+
+## Data models
+
+### Competency model
+
+<ResponseField name="id" type="string" required>
+  Unique competency identifier.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Display name of the competency.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Detailed description of what the competency covers.
+</ResponseField>
+
+<ResponseField name="icon" type="string" required>
+  Emoji or icon string used in the UI. Defaults to `"🎯"`.
+</ResponseField>
+
+<ResponseField name="learning_outcomes" type="string[]" required>
+  List of expected learning outcomes for this competency.
+</ResponseField>
+
+<ResponseField name="evaluation_criteria" type="object" required>
+  Map of criterion name to description. Defines the rubric used to evaluate applicant responses.
+</ResponseField>
+
+### Question model
+
+<ResponseField name="id" type="string" required>
+  Unique question identifier.
+</ResponseField>
+
+<ResponseField name="competency_id" type="string" required>
+  Identifier of the competency this question evaluates.
+</ResponseField>
+
+<ResponseField name="question_type" type="string" required>
+  One of: `multiple_choice`, `true_false`, `open_ended`, `scenario`, `saber_pro_contexto`, `conversational`, `practical`.
+</ResponseField>
+
+<ResponseField name="difficulty_level" type="number" required>
+  Integer from `1` (easiest) to `10` (hardest).
+</ResponseField>
+
+<ResponseField name="context" type="string" required>
+  Background context or scenario text presented before the question.
+</ResponseField>
+
+<ResponseField name="question_text" type="string" required>
+  The question as presented to the applicant.
+</ResponseField>
+
+<ResponseField name="options" type="string[]">
+  Answer options for `multiple_choice` and `true_false` question types. Empty for open-ended and conversational types.
+</ResponseField>
+
+<ResponseField name="correct_answer" type="string" required>
+  The correct answer or expected response pattern.
+</ResponseField>
+
+<ResponseField name="explanation" type="string" required>
+  Explanation of the correct answer used for evaluation feedback.
+</ResponseField>

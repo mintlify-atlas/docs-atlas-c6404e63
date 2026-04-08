@@ -1,0 +1,142 @@
+---
+title: "Authentication"
+description: "How the RAP API handles identity, session tracking, and what you need to secure before deploying to production."
+---
+
+## Current authentication model
+
+The RAP API does **not** require authentication for any endpoint in its current version. There are no API keys, bearer tokens, or login flows that clients must complete before calling the API.
+
+This design is intentional for the initial deployment context: a university-internal tool used by applicants and program staff at Universidad Icesi. All API calls succeed as long as the server is reachable.
+
+<Note>
+CORS is set to `allow_origins=["*"]` in `src/api.py`, which means any browser origin can call the API. This is acceptable for controlled university environments but should be tightened for any public-facing deployment.
+</Note>
+
+## Session-based access
+
+While there is no user authentication, every conversation is scoped to a **session ID**.
+
+### How session IDs work
+
+When you send the first message to `POST /api/chat` without providing a `session_id`, the server generates a UUID (v4) and returns it in the response. You must include this value in every subsequent request to continue the same conversation.
+
+```json
+// First request — no session_id
+{
+  "message": "Hola, quiero comenzar la evaluación"
+}
+
+// Server response — session_id assigned
+{
+  "message": "Bienvenido al sistema VAP...",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "current_step": "welcome",
+  ...
+}
+
+// Subsequent requests — include session_id
+{
+  "message": "Soy docente con 8 años de experiencia",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+<Warning>
+Session IDs are not authenticated. Anyone who knows a session ID can retrieve its report, reset the session, or delete it. Store session IDs securely on the client side and do not expose them in URLs or logs.
+</Warning>
+
+### Session storage
+
+Active sessions are held in server memory (`active_sessions` dict in `src/api.py`) and also persisted to PostgreSQL. In-memory sessions are lost on server restart; PostgreSQL records persist and are available through the admin export endpoints.
+
+### Session lifetime
+
+Sessions expire after **60 minutes of inactivity** by default (`session_ttl_minutes = 60` in `src/core/config.py`). You can change this via the `SESSION_TTL_MINUTES` environment variable.
+
+## Server-side credentials
+
+The only credential the system requires is the `OPENAI_API_KEY`, which is configured **on the server** as an environment variable. Clients never send or receive this key.
+
+```bash
+# .env (server-side only — never expose to clients)
+OPENAI_API_KEY=sk-...
+```
+
+Clients have no knowledge of, and no access to, the OpenAI API key.
+
+## Recommendations for production
+
+<Warning>
+The current open-CORS, no-auth setup is suitable for internal university use only. Before exposing the API to the public internet, implement at least one of the following layers.
+</Warning>
+
+### Option 1: Reverse proxy authentication (recommended)
+
+Add authentication at the nginx or Railway level so that only authenticated requests reach FastAPI. This requires no code changes to the backend.
+
+```nginx
+# nginx example: require Basic Auth before proxying to FastAPI
+location /api/ {
+    auth_basic "RAP Admin";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://localhost:8000;
+}
+```
+
+On Railway, you can use environment-based secrets and a custom proxy service to gate access.
+
+### Option 2: FastAPI middleware
+
+Add an API key middleware directly in `src/api.py` for lightweight token-based protection:
+
+```python
+from fastapi import Request, HTTPException
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    # Skip auth for health check and docs
+    if request.url.path in ("/api/health", "/docs", "/redoc"):
+        return await call_next(request)
+
+    api_key = request.headers.get("X-API-Key")
+    if api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return await call_next(request)
+```
+
+Add `api_key` to the `Settings` class in `src/core/config.py` and set `API_KEY` in your environment.
+
+### Option 3: Restrict CORS origins
+
+At minimum, replace the wildcard CORS origin with the specific domain of your frontend before going to production:
+
+```python
+# src/api.py — replace the current wildcard
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://rap.icesi.edu.co"],  # your production domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+## Admin endpoint access
+
+The admin endpoints (`/api/admin/sessions/summary` and `/api/admin/export/{session_id}`) return full conversation data and evaluation results. These should be considered sensitive and require stricter access controls than the applicant-facing chat endpoints.
+
+<Tip>
+As a short-term measure, you can route admin endpoints through a separate subdomain or path prefix and apply IP allowlisting at the infrastructure level to restrict access to university staff only.
+</Tip>
+
+## Summary
+
+| Aspect | Current behavior | Production recommendation |
+|--------|-----------------|--------------------------|
+| Client auth | None required | Add API key or OAuth via reverse proxy |
+| Session identity | UUID in request body | Store securely on client; treat as a secret |
+| OpenAI API key | Server-side env variable | Never expose to clients |
+| CORS | `allow_origins=["*"]` | Restrict to known domains |
+| Admin endpoints | Open, no auth | Protect with IP allowlist or separate auth layer |

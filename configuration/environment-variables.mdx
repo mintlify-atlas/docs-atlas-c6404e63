@@ -1,0 +1,201 @@
+---
+title: "Environment variables"
+description: "All environment variables supported by the RAP backend, with defaults and examples."
+---
+
+The backend reads configuration from a `.env` file at startup via `pydantic-settings`. Copy `env.example` to `.env` and set the values for your environment.
+
+```bash
+cp env.example .env
+```
+
+## Required variables
+
+<ParamField body="OPENAI_API_KEY" type="string" required>
+  OpenAI API key used for the primary LLM, the report LLM, and text embeddings.
+  Obtain yours at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+
+  ```bash
+  OPENAI_API_KEY=sk-...
+  ```
+</ParamField>
+
+## Database
+
+<ParamField body="DATABASE_URL" type="string">
+  PostgreSQL connection string. The system defaults to the shared Neon Tech
+  production database that ships with the repository. Override this in any
+  environment where you want data isolation.
+
+  **Default:** the Neon Tech pooled URL in `config.py`
+
+  ```bash
+  DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+  ```
+</ParamField>
+
+## LLM models
+
+<ParamField body="PRIMARY_LLM_MODEL" type="string">
+  OpenAI model used for the conversational assessment agent.
+
+  **Default:** `gpt-5-mini-2025-08-07`
+
+  ```bash
+  PRIMARY_LLM_MODEL=gpt-5-mini-2025-08-07
+  ```
+</ParamField>
+
+<ParamField body="REPORT_LLM_MODEL" type="string">
+  OpenAI model used for student and academic report generation.
+
+  **Default:** `gpt-5-2025-08-07`
+
+  ```bash
+  REPORT_LLM_MODEL=gpt-5-2025-08-07
+  ```
+</ParamField>
+
+<ParamField body="EMBEDDING_MODEL" type="string">
+  OpenAI model used to generate text embeddings for the ChromaDB knowledge base.
+
+  **Default:** `text-embedding-3-small`
+
+  ```bash
+  EMBEDDING_MODEL=text-embedding-3-small
+  ```
+</ParamField>
+
+## Assessment settings
+
+<ParamField body="MAX_QUESTIONS_PER_COMPETENCY" type="integer">
+  Maximum number of questions asked per competency during a single assessment session.
+
+  **Default:** `5`
+
+  ```bash
+  MAX_QUESTIONS_PER_COMPETENCY=5
+  ```
+</ParamField>
+
+<ParamField body="PASSING_SCORE_THRESHOLD" type="float">
+  Minimum percentage score required for a competency to be considered passing.
+
+  **Default:** `60.0`
+
+  ```bash
+  PASSING_SCORE_THRESHOLD=60.0
+  ```
+</ParamField>
+
+## Session management
+
+<ParamField body="SESSION_TTL_MINUTES" type="integer">
+  Time-to-live in minutes for inactive sessions. Sessions that have not received
+  activity within this window are eligible for cleanup.
+
+  **Default:** `60`
+
+  ```bash
+  SESSION_TTL_MINUTES=60
+  ```
+</ParamField>
+
+## Program configuration
+
+<ParamField body="PROGRAM_NAME" type="string">
+  Display name of the master's program configured in this deployment.
+
+  **Default:** `Maestría en Educación con Énfasis en TIC`
+
+  ```bash
+  PROGRAM_NAME="Maestría en Educación con Énfasis en TIC"
+  ```
+</ParamField>
+
+<ParamField body="PROGRAM_ID" type="string">
+  Machine-readable identifier for the active program. Must match the `id` field
+  of an entry in `data/programs.json`.
+
+  **Default:** `MEMTIC_2024`
+
+  ```bash
+  PROGRAM_ID=MEMTIC_2024
+  ```
+</ParamField>
+
+## Paths
+
+<ParamField body="DATA_DIRECTORY" type="string">
+  Path to the directory containing `programs.json`, `questions.json`, and the
+  `chroma/` vector store. Relative paths are resolved from the working directory
+  where the backend process starts.
+
+  **Default:** `./data`
+
+  ```bash
+  DATA_DIRECTORY=./data
+  ```
+</ParamField>
+
+## Server
+
+<ParamField body="PORT" type="integer">
+  TCP port the FastAPI server listens on. Railway sets this automatically; set it
+  explicitly only when running locally or in Docker.
+
+  **Default:** `8000`
+
+  ```bash
+  PORT=8000
+  ```
+</ParamField>
+
+## Quick reference
+
+| Variable | Required | Default |
+|---|---|---|
+| `OPENAI_API_KEY` | Yes | — |
+| `DATABASE_URL` | No | Neon Tech production URL |
+| `PRIMARY_LLM_MODEL` | No | `gpt-5-mini-2025-08-07` |
+| `REPORT_LLM_MODEL` | No | `gpt-5-2025-08-07` |
+| `EMBEDDING_MODEL` | No | `text-embedding-3-small` |
+| `MAX_QUESTIONS_PER_COMPETENCY` | No | `5` |
+| `PASSING_SCORE_THRESHOLD` | No | `60.0` |
+| `SESSION_TTL_MINUTES` | No | `60` |
+| `PROGRAM_NAME` | No | `Maestría en Educación con Énfasis en TIC` |
+| `PROGRAM_ID` | No | `MEMTIC_2024` |
+| `DATA_DIRECTORY` | No | `./data` |
+| `PORT` | No | `8000` |
+
+## Complete `.env` example
+
+```bash
+# Required
+OPENAI_API_KEY=sk-...
+
+# Database
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+
+# LLM models
+PRIMARY_LLM_MODEL=gpt-5-mini-2025-08-07
+REPORT_LLM_MODEL=gpt-5-2025-08-07
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Assessment
+MAX_QUESTIONS_PER_COMPETENCY=5
+PASSING_SCORE_THRESHOLD=60.0
+
+# Sessions
+SESSION_TTL_MINUTES=60
+
+# Program
+PROGRAM_NAME="Maestría en Educación con Énfasis en TIC"
+PROGRAM_ID=MEMTIC_2024
+
+# Paths
+DATA_DIRECTORY=./data
+
+# Server
+PORT=8000
+```
